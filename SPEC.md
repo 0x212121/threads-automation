@@ -68,6 +68,8 @@ Klien OAuth Threads membangun URL otorisasi, menukar kode dan memeriksa profil t
 
 Pembacaan respons mempertahankan ID numerik besar sebagai teks dari sumber JSON asli pada Node.js 24. Kegagalan callback dikembalikan sebagai tahap terbatas (sesi, penolakan, pertukaran kode, token jangka panjang, profil, atau penyimpanan), dengan kode Meta numerik jika tersedia. Log hanya mencatat event, tahap, status HTTP dan kode Meta, tanpa pesan mentah, URL permintaan, kode otorisasi atau token. State tetap sekali pakai meskipun pertukaran gagal; pengguna harus memulai koneksi baru.
 
+Pertukaran token jangka panjang mengikuti contoh resmi Meta: server mengirim GET `/access_token` dengan `grant_type=th_exchange_token`, `client_secret`, dan token sementara pada parameter `access_token`. URL berkredensial ini hanya dibuat di server dan tidak ditampilkan atau dicatat dalam log, termasuk saat transport gagal.
+
 Tombol koneksi admin memeriksa ulang status pengguna dan konfigurasi saat diklik. Jika syarat belum terpenuhi, tampilkan alasan di panel; jika siap, minta URL OAuth melalui POST ber-CSRF dan pindah ke URL Threads HTTPS yang tervalidasi. Tautan lanjut tersedia setelah URL diterima sebagai alternatif bila navigasi otomatis tidak terjadi.
 
 URL otorisasi dibuat langsung pada `https://www.threads.com/oauth/authorize`, tujuan redirect yang diamati pada 5 November 2026. Browser memeriksa `client_id`, `response_type`, state dan callback sebelum navigasi. Domain Threads lama masih diterima untuk kompatibilitas saat frontend dan backend diperbarui bertahap. Perubahan domain ini mengurangi redirect dan belum membuktikan penyebab error Meta tertentu.

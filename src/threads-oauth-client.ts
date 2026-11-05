@@ -27,8 +27,8 @@ export class ThreadsOAuthClient {
     const id = typeof idValue === 'string' ? idValue : typeof idValue === 'number' && Number.isSafeInteger(idValue) ? String(idValue) : '';
     if (!/^[0-9]+$/.test(id)) throw new ThreadsOAuthError('Identitas Meta tidak valid.', 'code_exchange');
     const longUrl = new URL('https://graph.threads.net/access_token');
-    longUrl.search = new URLSearchParams({ grant_type: 'th_exchange_token', client_secret: this.config.appSecret }).toString();
-    const long = await this.json(longUrl.toString(), { headers: { Authorization: `Bearer ${shortToken}` } }, 'long_token');
+    longUrl.search = new URLSearchParams({ grant_type: 'th_exchange_token', client_secret: this.config.appSecret, access_token: shortToken }).toString();
+    const long = await this.json(longUrl.toString(), { method: 'GET' }, 'long_token');
     const token = this.stringField(long, 'access_token', 'long_token');
     if (typeof long.expires_in !== 'number' || !Number.isSafeInteger(long.expires_in) || long.expires_in <= 0 || long.expires_in > 10 * 365 * 24 * 60 * 60) throw new ThreadsOAuthError('Masa berlaku token Meta tidak valid.', 'long_token');
     const me = await this.json('https://graph.threads.net/me?fields=id%2Cusername', { headers: { Authorization: `Bearer ${token}` } }, 'profile');

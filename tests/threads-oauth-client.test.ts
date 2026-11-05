@@ -26,7 +26,12 @@ test('OAuth menyusun izin minimum dan memeriksa identitas dari respons Meta', as
   assert.equal(result.token, 'long-test');
   assert.equal(calls.length, 3);
   assert.equal((calls[0]?.options?.body as URLSearchParams).get('redirect_uri'), 'https://example.test/auth/callback');
-  assert.equal((calls[1]?.options?.headers as Record<string, string>).Authorization, 'Bearer short-test');
+  const longRequest = new URL(calls[1]!.url);
+  assert.equal(longRequest.pathname, '/access_token');
+  assert.equal(longRequest.searchParams.get('grant_type'), 'th_exchange_token');
+  assert.equal(longRequest.searchParams.get('client_secret'), 'secret-test');
+  assert.equal(longRequest.searchParams.get('access_token'), 'short-test');
+  assert.equal(calls[1]?.options?.method, 'GET');
 });
 
 test('ID numerik besar dari Meta dipertahankan persis tanpa pembulatan', async () => {
@@ -50,6 +55,26 @@ test('diagnosis hanya membawa tahap dan kode Meta tanpa isi respons sensitif', a
     assert.equal(error.message.includes('code-test'), false);
     return true;
   });
+});
+
+test('kegagalan transport token jangka panjang tidak membocorkan URL berkredensial', async () => {
+  let count = 0;
+  let observedToken: string | null = null;
+  const fetcher = (async (url: string | URL | Request) => {
+    if (++count === 1) return new Response('{"access_token":"short+/test=&","user_id":"123"}', { status: 200 });
+    const requestUrl = new URL(String(url));
+    observedToken = requestUrl.searchParams.get('access_token');
+    throw new Error(String(url));
+  }) as typeof fetch;
+  const client = new ThreadsOAuthClient({ appId: '1234', appSecret: 'secret-test', redirectUri: 'https://example.test/callback' }, fetcher);
+  await assert.rejects(client.exchange('code-test'), error => {
+    assert.ok(error instanceof ThreadsOAuthError); assert.equal(error.stage, 'long_token');
+    const output = error.message + JSON.stringify(error);
+    for (const secret of ['secret-test', 'short+/test=&', 'short%2B%2Ftest', 'code-test']) assert.equal(output.includes(secret), false);
+    return true;
+  });
+  assert.equal(count, 2);
+  assert.equal(observedToken, 'short+/test=&');
 });
 
 test('identitas berbeda dan kesalahan jaringan ditolak tanpa membocorkan secret', async () => {
