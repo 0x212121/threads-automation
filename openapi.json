@@ -961,7 +961,7 @@
         ],
         "responses": {
           "303": {
-            "description": "Kembali ke aplikasi dengan status koneksi"
+            "description": "Kembali ke aplikasi: #threads=connected atau #threads=failed&reason=TAHAP. Tahap kegagalan: configuration, access, session, denied, callback, code_exchange, long_token, profile, storage. meta_code opsional hanya berisi kode numerik Meta. Tidak menyertakan kode otorisasi, token, secret, atau pesan mentah Meta. Callback tanpa cookie sesi diarahkan dengan reason=session."
           },
           "401": {
             "$ref": "#/components/responses/Error"

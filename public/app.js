@@ -4,7 +4,7 @@ let csrf = '', user = null, posts = [], accounts = [], accountsAvailable = true,
 let threadsConnecting = false;
 const linkParams = new URLSearchParams(location.hash.slice(1));
 let verificationToken = linkParams.get('verify'), invitationToken = linkParams.get('invite'), resetToken = linkParams.get('reset');
-const threadsResult = linkParams.get('threads');
+let threadsResult = linkParams.get('threads');
 if (verificationToken || invitationToken || resetToken || threadsResult) history.replaceState(null, '', location.pathname + location.search);
 
 async function api(path, options = {}) {
@@ -37,7 +37,24 @@ function showWorkspace() {
   $('#invitation-pending').hidden = !invitationToken;
   $('#reset-pending').hidden = !resetToken;
   if (threadsResult === 'connected') errorAt('#verification-status', 'Akun Threads berhasil dihubungkan.');
-  if (threadsResult === 'failed') errorAt('#verification-status', 'Akun Threads belum dapat dihubungkan. Periksa konfigurasi atau coba lagi.');
+  if (threadsResult === 'failed') {
+    const reasons = {
+      session: 'Sesi koneksi telah kedaluwarsa atau berbeda. Klik Hubungkan akun Threads lagi dan selesaikan pada browser yang sama dalam 10 menit.',
+      denied: 'Otorisasi ditolak atau dibatalkan di Threads. Klik Hubungkan akun Threads untuk mencoba lagi.',
+      callback: 'Meta tidak mengirim kode otorisasi. Mulai koneksi kembali dari aplikasi.',
+      configuration: 'Konfigurasi Threads di server belum lengkap. Periksa konfigurasi dan buat ulang container.',
+      access: 'Koneksi memerlukan administrator dengan email terverifikasi.',
+      code_exchange: 'Pertukaran kode otorisasi ditolak atau responsnya tidak valid. Periksa Threads App ID, Threads App Secret, dan callback, lalu mulai koneksi baru.',
+      long_token: 'Token jangka panjang belum dapat diperoleh. Periksa konfigurasi Threads di server dan mulai koneksi baru.',
+      profile: 'Identitas profil Threads belum dapat diverifikasi. Periksa akses akun dan izin threads_basic, lalu mulai koneksi baru.',
+      storage: 'Akun Threads belum dapat disimpan. Periksa migrasi database, koneksi database, dan kunci enkripsi di server.'
+    };
+    const reason = linkParams.get('reason');
+    const message = Object.hasOwn(reasons, reason) ? reasons[reason] : 'Akun Threads belum dapat dihubungkan. Mulai koneksi kembali atau periksa konfigurasi server.';
+    const metaCode = linkParams.get('meta_code');
+    errorAt('#threads-connect-error', message + (metaCode && /^[0-9]{1,12}$/.test(metaCode) ? ` Kode Meta: ${metaCode}.` : ''));
+  }
+  threadsResult = null;
 }
 async function loadPosts(append = false) {
   $('#loading').hidden = false; errorAt('#workspace-error', '');

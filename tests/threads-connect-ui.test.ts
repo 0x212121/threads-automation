@@ -8,10 +8,10 @@ async function waitFor(check: () => boolean) {
   while (!check()) { if (Date.now() > deadline) throw new Error('Status koneksi tidak diperbarui.'); await new Promise(resolve => setTimeout(resolve, 10)); }
 }
 
-for (const scenario of ['ready', 'unverified', 'missing-config', 'server-error', 'verified-elsewhere', 'missing-client-id'] as const) {
+for (const scenario of ['ready', 'unverified', 'missing-config', 'server-error', 'verified-elsewhere', 'missing-client-id', 'callback-failure'] as const) {
   test(`klik koneksi Threads: ${scenario}`, async () => {
     const [html, script] = await Promise.all([readFile('public/index.html', 'utf8'), readFile('public/app.js', 'utf8')]);
-    const dom = new JSDOM(html, { url: 'https://example.test', runScripts: 'outside-only', virtualConsole: new VirtualConsole() });
+    const dom = new JSDOM(html, { url: scenario === 'callback-failure' ? 'https://example.test/#threads=failed&reason=long_token&meta_code=190' : 'https://example.test', runScripts: 'outside-only', virtualConsole: new VirtualConsole() });
     try {
       let clicks = false;
       const calls: string[] = [];
@@ -38,11 +38,16 @@ for (const scenario of ['ready', 'unverified', 'missing-config', 'server-error',
       dom.window.eval(script);
       const get = (selector: string) => dom.window.document.querySelector(selector) as HTMLElement;
       await waitFor(() => !get('#workspace').hidden && get('#loading').hidden);
+      if (scenario === 'callback-failure') {
+        assert.match(get('#threads-connect-error').textContent ?? '', /Token jangka panjang/);
+        assert.match(get('#threads-connect-error').textContent ?? '', /Kode Meta: 190/);
+        assert.equal(dom.window.location.hash, '');
+      }
       const button = get('#connect-threads') as HTMLButtonElement;
       assert.equal(button.disabled, false);
       clicks = true; button.click();
       await waitFor(() => !button.disabled);
-      if (scenario === 'ready' || scenario === 'verified-elsewhere') {
+      if (scenario === 'ready' || scenario === 'verified-elsewhere' || scenario === 'callback-failure') {
         assert.equal((get('#continue-threads') as HTMLAnchorElement).href, authorizationUrl);
         assert.equal(get('#continue-threads').hidden, false);
         assert.equal(calls.filter(path => path === '/api/threads/oauth/start').length, 1);

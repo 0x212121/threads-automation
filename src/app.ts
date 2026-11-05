@@ -14,7 +14,7 @@ import { Invitations, InvitationError } from './invitations.js';
 import { PasswordReset } from './password-reset.js';
 import { ThreadsAccounts } from './threads-accounts.js';
 import { TokenVault } from './token-vault.js';
-import { ThreadsOAuthClient } from './threads-oauth-client.js';
+import { ThreadsOAuthClient, ThreadsOAuthError } from './threads-oauth-client.js';
 import { PublicationRequests, PublicationRequestError } from './publication-requests.js';
 
 declare module 'express-session' {
@@ -126,18 +126,35 @@ export async function createApp(options: Options) {
       res.set('Cache-Control', 'no-store').json({ authorizationUrl: options.threads.client.authorizationUrl(state) });
     } catch (error) { next(error); }
   });
-  app.get('/api/threads/oauth/callback', requireUser, async (req, res) => {
+  app.get('/api/threads/oauth/callback', (req, res, next) => {
+    if (!req.session.userId) { res.set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer').redirect(303, '/#threads=failed&reason=session'); return; }
+    next();
+  }, requireUser, async (req, res) => {
     res.set('Cache-Control', 'no-store'); res.set('Referrer-Policy', 'no-referrer');
+    const fail = (reason: string, error?: unknown) => {
+      const details = error instanceof ThreadsOAuthError ? { httpStatus: error.httpStatus, metaCode: error.metaCode } : {};
+      console.error(JSON.stringify({ event: 'threads_oauth_failed', stage: reason, ...details }));
+      const params = new URLSearchParams({ threads: 'failed', reason });
+      if (details.metaCode !== undefined) params.set('meta_code', String(details.metaCode));
+      res.redirect(303, `/#${params}`);
+    };
     const user = res.locals.user as User;
     const state = req.query.state, code = req.query.code;
-    if (!options.threads || user.role !== 'admin' || !user.email_verified_at || typeof state !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(state)) { res.redirect(303, '/#threads=failed'); return; }
+    if (!options.threads) { fail('configuration'); return; }
+    if (user.role !== 'admin' || !user.email_verified_at) { fail('access'); return; }
+    if (typeof state !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(state)) { fail('session'); return; }
+    let stage = 'storage';
     try {
       const consumed = await options.pool.query('DELETE FROM threads_oauth_states WHERE state_hash=$1 AND user_id=$2 AND session_hash=$3 AND expires_at>now() RETURNING state_hash', [sha256(state), user.id, sha256(req.sessionID)]);
-      if (consumed.rowCount !== 1 || typeof code !== 'string' || !code) { res.redirect(303, '/#threads=failed'); return; }
+      if (consumed.rowCount !== 1) { fail('session'); return; }
+      if (req.query.error !== undefined) { fail('denied'); return; }
+      if (typeof code !== 'string' || !code) { fail('callback'); return; }
+      stage = 'code_exchange';
       const account = await options.threads.client.exchange(code);
+      stage = 'storage';
       await new ThreadsAccounts(options.pool, options.threads.vault).register(user.id, account);
       res.redirect(303, '/#threads=connected');
-    } catch { res.redirect(303, '/#threads=failed'); }
+    } catch (error) { fail(error instanceof ThreadsOAuthError ? error.stage : stage, error); }
   });
   app.get('/api/threads/accounts', requireUser, async (_req, res, next) => {
     try {

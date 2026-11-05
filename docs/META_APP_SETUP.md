@@ -37,3 +37,9 @@ Panduan awal, diperiksa 5 November 2026. Nama menu dan persyaratan Meta dapat be
 Jika Meta menampilkan `4476002`, periksa parameter `client_id` pada permintaan otorisasi yang dibuat aplikasi, bukan hanya isi file `.env`. Environment Linux peka huruf besar/kecil: aplikasi membaca `THREADS_APP_ID`. Setelah mengubah konfigurasi Compose, buat ulang container; restart saja tidak menerapkan environment baru. Gunakan pasangan ID/secret khusus Threads. App Secret baru dipakai setelah callback untuk pertukaran kode dan tidak dikirim ke halaman otorisasi browser.
 
 Domain otorisasi langsung saat ini adalah `https://www.threads.com/oauth/authorize`. Uji HTTP pada 5 November 2026 menunjukkan domain `threads.net` mengarah ke domain tersebut dan tetap membawa `client_id`; perpindahan domain saja belum membuktikan penyebab error. Jangan membagikan URL OAuth lengkap karena memuat state sesi. Jika parameter sudah cocok, periksa peran akun uji dan status undangannya serta konfigurasi use case di dashboard Meta.
+
+## 6. Kegagalan setelah kembali ke aplikasi
+
+Panel koneksi menampilkan tahap kegagalan, bukan hanya pesan umum. Untuk kegagalan sesi, mulai ulang melalui tombol dan selesaikan pada browser yang sama dalam 10 menit. Untuk pertukaran kode, periksa pasangan kredensial Threads dan callback yang terdaftar. Untuk token jangka panjang atau profil, lihat kode Meta dan akses akun. Untuk penyimpanan, pastikan migrasi telah diterapkan serta database dan kunci enkripsi tersedia. Setiap percobaan membutuhkan kode dan state baru; jangan mengulang URL callback lama.
+
+Operator dapat menjalankan `docker compose logs --tail=100 app` dan mencari event `threads_oauth_failed`. Event hanya memuat tahap serta status HTTP/kode numerik Meta jika tersedia. Jangan mengaktifkan pencatatan URL callback lengkap atau membagikan token dan secret. Diagnosis tahap ini belum menggantikan uji koneksi Meta sungguhan.
