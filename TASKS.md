@@ -47,6 +47,7 @@ Status awal: perencanaan. Kotak belum dicentang bukan klaim bahwa pekerjaan suda
 - [ ] Lengkapi koneksi Threads dengan pemeriksaan izin dan pemutusan akun.
 - [x] Tambahkan carousel gambar dan rangkaian balasan dengan pemecahan otomatis, versi konten, serta penanganan hasil sebagian. Pengujian Meta sungguhan untuk kedua fitur masih diperlukan.
 - [x] Tambahkan scope balasan ke OAuth dan diagnosis kode Meta yang aman setelah laporan rangkaian berhenti pada bagian kedua. Otorisasi ulang dan uji Meta nyata masih diperlukan untuk memastikan penyebab dan hasilnya.
+- [x] Tambahkan perintah server untuk memeriksa scope token melalui endpoint debug Meta tanpa menampilkan token; hasil dan perilaku endpoint masih perlu diverifikasi pada instalasi pengguna.
 - [ ] Lengkapi validasi media/teks terhadap semua batas Meta, tampilan riwayat versi, retensi dan pembersihan berkas yatim.
 - [ ] Validasi kebijakan persetujuan dan pembatalannya terhadap seluruh alur UI, API dan kondisi bersamaan.
 

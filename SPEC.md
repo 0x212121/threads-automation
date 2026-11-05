@@ -68,6 +68,8 @@ Klien OAuth Threads membangun URL otorisasi, menukar kode dan memeriksa profil t
 
 Permintaan OAuth mencakup `threads_basic`, `threads_content_publish`, `threads_manage_replies`, dan `threads_read_replies` untuk publikasi rangkaian dan verifikasi balasan. Akun yang dihubungkan sebelum perubahan scope perlu otorisasi ulang; izin aktual dan dukungan Meta tetap perlu diverifikasi. Penolakan pembuatan kontainer dicatat hanya sebagai event, ID pekerjaan, nomor bagian, status HTTP dan kode/subkode numerik Meta, tanpa respons mentah, teks posting, URL, atau token.
 
+Operator server dapat menjalankan pemeriksaan izin token melalui endpoint debug Meta. Hasil dibatasi pada validitas, kecocokan App ID, status pemeriksaan, dan empat nama scope yang digunakan; token dan respons mentah tidak dicetak. Pemeriksaan izin ini bersifat diagnostik dan tidak membuktikan semua ketentuan akses Meta terpenuhi.
+
 Pembacaan respons mempertahankan ID numerik besar sebagai teks dari sumber JSON asli pada Node.js 24. Kegagalan callback dikembalikan sebagai tahap terbatas (sesi, penolakan, pertukaran kode, token jangka panjang, profil, atau penyimpanan), dengan kode Meta numerik jika tersedia. Log hanya mencatat event, tahap, status HTTP, kode/subkode Meta dan kategori terbatas, tanpa pesan mentah, URL permintaan, kode otorisasi atau token. State tetap sekali pakai meskipun pertukaran gagal; pengguna harus memulai koneksi baru.
 
 Pertukaran token jangka panjang mengikuti contoh resmi Meta: server mengirim GET `/access_token` dengan `grant_type=th_exchange_token`, `client_secret`, dan token sementara pada parameter `access_token`. URL berkredensial ini hanya dibuat di server dan tidak ditampilkan atau dicatat dalam log, termasuk saat transport gagal.

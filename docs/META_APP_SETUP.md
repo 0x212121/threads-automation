@@ -53,3 +53,11 @@ Jika instalasi lama berhenti pada tahap `long_token` dengan kode Meta 100, perba
 Bagian setelah posting pertama dikirim sebagai balasan. Pastikan Meta App menyediakan izin balasan yang diminta, perbarui aplikasi, lalu sebagai admin hubungkan ulang akun Threads dan setujui izin yang muncul. Perubahan scope aplikasi tidak mengubah token lama secara otomatis. Setelah koneksi kembali, gunakan **Lanjutkan rangkaian** pada pekerjaan yang terhenti; aplikasi melanjutkan dari bagian yang belum terbit tanpa membuat draft baru.
 
 Jika tetap gagal, cari event `threads_container_rejected` pada `docker compose logs --tail=100 app`. Event hanya memuat ID pekerjaan, nomor bagian, status HTTP, serta kode/subkode numerik Meta jika tersedia. Kode dapat dipakai untuk diagnosis; jangan membagikan token, URL OAuth, atau pesan provider mentah. Log baru hanya muncul untuk percobaan setelah pembaruan dan tidak menjelaskan penyebab percobaan lama secara pasti.
+
+Untuk memeriksa izin yang benar-benar melekat pada token akun terhubung, operator server dapat menjalankan:
+
+```bash
+docker compose exec -T app npm run check-threads-permissions
+```
+
+Perintah ini memanggil endpoint debug resmi Meta dari server dan hanya menampilkan nama akun, validitas token, kecocokan App ID, dan empat nama izin yang dipakai aplikasi. Token, App Secret, URL, dan respons mentah tidak ditampilkan. `missing` berisi izin yang tidak diberikan; daftar kosong tidak membuktikan bahwa semua kebijakan Meta atau kondisi posting sudah terpenuhi. `debug_failed` atau respons tak dikenal berarti pemeriksaan tidak selesai dan bukan bukti izin tertentu hilang. Jika scope kurang, periksa use case pada Meta App dan hubungkan kembali akun dengan izin tersebut. Jika semua ada tetapi Meta masih menolak, periksa status tester, akses dan kebijakan akun/aplikasi di Meta; jangan menyimpulkan penyebab hanya dari kode 10.

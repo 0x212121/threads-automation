@@ -12,6 +12,7 @@
     "demo": "node demo/server.mjs",
     "migrate": "node dist/migrate.js",
     "bootstrap-admin": "node dist/bootstrap-cli.js",
+    "check-threads-permissions": "node dist/threads-token-diagnostic-cli.js",
     "local": "npm run build && node scripts/local.mjs"
   },
   "keywords": [],
