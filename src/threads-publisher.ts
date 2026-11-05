@@ -1,5 +1,5 @@
 export class ContainerCreationError extends Error {
-  constructor(message: string, readonly retryable: boolean = false, readonly reason: 'meta_auth' | 'meta_rejected' | 'meta_unavailable' = 'meta_rejected') { super(message); }
+  constructor(message: string, readonly retryable: boolean = false, readonly reason: 'meta_auth' | 'meta_rejected' | 'meta_unavailable' = 'meta_rejected', readonly httpStatus?: number, readonly metaCode?: number, readonly metaSubcode?: number) { super(message); }
 }
 export class PublicationUncertainError extends Error {}
 
@@ -34,7 +34,18 @@ export class ThreadsPublisher {
     url.search = new URLSearchParams(params).toString();
     try {
       const response = await this.request(url.toString(), { method: 'POST', headers: { Authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(15000) });
-      if (!response.ok) throw new ContainerCreationError('Container Threads tidak dapat dibuat.', response.status === 429 || response.status >= 500, response.status === 401 || response.status === 403 ? 'meta_auth' : response.status === 429 || response.status >= 500 ? 'meta_unavailable' : 'meta_rejected');
+      if (!response.ok) {
+        let code: number | undefined, subcode: number | undefined;
+        try {
+          const data: unknown = await response.json();
+          const error = data && typeof data === 'object' && 'error' in data ? data.error : null;
+          if (error && typeof error === 'object') {
+            if ('code' in error && typeof error.code === 'number' && Number.isSafeInteger(error.code)) code = error.code;
+            if ('error_subcode' in error && typeof error.error_subcode === 'number' && Number.isSafeInteger(error.error_subcode)) subcode = error.error_subcode;
+          }
+        } catch { /* Do not retain provider response bodies. */ }
+        throw new ContainerCreationError('Container Threads tidak dapat dibuat.', response.status === 429 || response.status >= 500, response.status === 401 || response.status === 403 ? 'meta_auth' : response.status === 429 || response.status >= 500 ? 'meta_unavailable' : 'meta_rejected', response.status, code, subcode);
+      }
       const value: unknown = await response.json();
       if (!value || typeof value !== 'object' || typeof (value as { id?: unknown }).id !== 'string' || !/^[0-9]+$/.test((value as { id: string }).id)) throw new ContainerCreationError('Respons container tidak valid.');
       return (value as { id: string }).id;

@@ -46,6 +46,7 @@ Status awal: perencanaan. Kotak belum dicentang bukan klaim bahwa pekerjaan suda
 - [x] Tambahkan refresh token otomatis dan status koneksi yang memerlukan tindakan; uji menggunakan respons Meta simulasi. Uji dengan token nyata masih diperlukan.
 - [ ] Lengkapi koneksi Threads dengan pemeriksaan izin dan pemutusan akun.
 - [x] Tambahkan carousel gambar dan rangkaian balasan dengan pemecahan otomatis, versi konten, serta penanganan hasil sebagian. Pengujian Meta sungguhan untuk kedua fitur masih diperlukan.
+- [x] Tambahkan scope balasan ke OAuth dan diagnosis kode Meta yang aman setelah laporan rangkaian berhenti pada bagian kedua. Otorisasi ulang dan uji Meta nyata masih diperlukan untuk memastikan penyebab dan hasilnya.
 - [ ] Lengkapi validasi media/teks terhadap semua batas Meta, tampilan riwayat versi, retensi dan pembersihan berkas yatim.
 - [ ] Validasi kebijakan persetujuan dan pembatalannya terhadap seluruh alur UI, API dan kondisi bersamaan.
 

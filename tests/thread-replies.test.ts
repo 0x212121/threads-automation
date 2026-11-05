@@ -69,5 +69,25 @@ test('rangkaian berhenti saat hasil balasan tidak pasti dan melanjutkan tanpa me
   await processPublication(queue,vault,retryPublisher);
   assert.equal(roots,1); assert.equal(tries,3);
   assert.equal((await db.query<{status:string}>('SELECT status FROM publication_jobs WHERE id=$1',[job2.id])).rows[0]?.status,'published');
+  const post3=await content.create(actor,{body:'Satu',replies:['Dua'],destinationAccountId:account});
+  await content.transition(actor,post3.id,1,'submit'); await content.transition(actor,post3.id,2,'approve');
+  const job3=await requests.publishNow(owner,post3.id,3,'UTC');
+  let creates=0, deny=true;
+  const permissionPublisher=new ThreadsPublisher((async (input:string|URL|Request) => {
+    const url=new URL(String(input));
+    if (url.pathname==='/me/threads') { creates++; if (creates===2 && deny) return Response.json({error:{code:10,error_subcode:42,message:'test-token teks rahasia'}},{status:403}); return Response.json({id:String(500+creates)}); }
+    return Response.json({id:String(600+creates)});
+  }) as typeof fetch);
+  const warnings:string[]=[]; const originalWarn=console.warn;
+  try {
+    console.warn=(message?:unknown) => { warnings.push(String(message)); };
+    await processPublication(queue,vault,permissionPublisher); await processPublication(queue,vault,permissionPublisher);
+  } finally { console.warn=originalWarn; }
+  const rejected=(await db.query<{status:string;failure_code:string}>('SELECT status,failure_code FROM publication_jobs WHERE id=$1',[job3.id])).rows[0];
+  assert.equal(rejected?.status,'needs_action'); assert.equal(rejected?.failure_code,'meta_auth');
+  assert.equal(warnings.length,1); assert.equal(warnings[0]?.includes('test-token'),false); assert.equal(warnings[0]?.includes('teks rahasia'),false);
+  assert.deepEqual(JSON.parse(warnings[0]!),{event:'threads_container_rejected',jobId:job3.id,part:2,httpStatus:403,metaCode:10,metaSubcode:42});
+  deny=false; await requests.resume(owner,post3.id,3,job3.id); await processPublication(queue,vault,permissionPublisher);
+  assert.equal(creates,3); assert.equal((await db.query<{status:string}>('SELECT status FROM publication_jobs WHERE id=$1',[job3.id])).rows[0]?.status,'published');
   await db.close();
 });

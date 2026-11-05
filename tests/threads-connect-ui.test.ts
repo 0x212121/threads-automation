@@ -16,7 +16,7 @@ for (const scenario of ['ready', 'unverified', 'missing-config', 'server-error',
       let clicks = false;
       const calls: string[] = [];
       const target = new URL('https://www.threads.com/oauth/authorize');
-      target.search = new URLSearchParams({ client_id: '123', state: 'a'.repeat(43), response_type: 'code', redirect_uri: 'https://example.test/api/threads/oauth/callback', scope: 'threads_basic,threads_content_publish' }).toString();
+      target.search = new URLSearchParams({ client_id: '123', state: 'a'.repeat(43), response_type: 'code', redirect_uri: 'https://example.test/api/threads/oauth/callback', scope: 'threads_basic,threads_content_publish,threads_manage_replies,threads_read_replies' }).toString();
       if (scenario === 'missing-client-id') target.searchParams.delete('client_id');
       const authorizationUrl = target.toString();
       dom.window.fetch = (async (path: string, init?: RequestInit) => {

@@ -35,7 +35,10 @@ export async function processPublication(queue: PublicationQueue, vault: TokenVa
         container = await publisher.createCarouselContainer(token,payload.body,children);
       } else container = payload.media_id && payload.media_kind && media ? await publisher.createMediaContainer(token,payload.body,payload.media_kind,media.store.downloadUrl(media.origin,job.id,payload.media_id)) : await publisher.createTextContainer(token, payload.body, job.reply_to_id);
     }
-    catch (error) { await queue.preparationFailed(job.id, job.lease_token, error instanceof ContainerCreationError && error.retryable, error instanceof ContainerCreationError ? error.reason : 'meta_rejected'); return true; }
+    catch (error) {
+      if (error instanceof ContainerCreationError && error.httpStatus) console.warn(JSON.stringify({ event:'threads_container_rejected', jobId:job.id, part:job.part_index + 1, httpStatus:error.httpStatus, metaCode:error.metaCode ?? null, metaSubcode:error.metaSubcode ?? null }));
+      await queue.preparationFailed(job.id, job.lease_token, error instanceof ContainerCreationError && error.retryable, error instanceof ContainerCreationError ? error.reason : 'meta_rejected'); return true;
+    }
     if (!await queue.markPrepared(job.id, job.lease_token, container)) return true;
   }
   if (!container) { await queue.needsAction(job.id, job.lease_token); return true; }

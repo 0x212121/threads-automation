@@ -18,7 +18,7 @@ test('OAuth menyusun izin minimum dan memeriksa identitas dari respons Meta', as
   assert.equal(url.searchParams.get('client_id'), '1234');
   assert.equal(url.searchParams.get('response_type'), 'code');
   assert.equal(url.searchParams.get('state'), 'a'.repeat(43));
-  assert.equal(url.searchParams.get('scope'), 'threads_basic,threads_content_publish');
+  assert.equal(url.searchParams.get('scope'), 'threads_basic,threads_content_publish,threads_manage_replies,threads_read_replies');
   assert.equal(url.searchParams.get('redirect_uri'), 'https://example.test/auth/callback');
   assert.equal(url.toString().includes('secret-test'), false);
   const result = await client.exchange('code-test');

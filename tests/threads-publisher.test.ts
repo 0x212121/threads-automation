@@ -25,8 +25,8 @@ test('timeout atau respons gagal setelah publikasi selalu ditandai tidak pasti',
   await assert.rejects(badReply.publishContainer('secret-test', '123'), PublicationUncertainError);
   const rejected = new ThreadsPublisher((async () => new Response('{}', { status: 400 })) as typeof fetch);
   await assert.rejects(rejected.createTextContainer('secret-test', 'Isi'), error => error instanceof ContainerCreationError && !error.retryable);
-  const forbidden = new ThreadsPublisher((async () => new Response('{"error":{"message":"secret-test"}}', { status: 403 })) as typeof fetch);
-  await assert.rejects(forbidden.createTextContainer('secret-test', 'Isi'), error => error instanceof ContainerCreationError && error.reason === 'meta_auth' && !error.message.includes('secret-test'));
+  const forbidden = new ThreadsPublisher((async () => new Response('{"error":{"message":"secret-test","code":10,"error_subcode":123}}', { status: 403 })) as typeof fetch);
+  await assert.rejects(forbidden.createTextContainer('secret-test', 'Isi','123'), error => error instanceof ContainerCreationError && error.reason === 'meta_auth' && error.httpStatus === 403 && error.metaCode === 10 && error.metaSubcode === 123 && !JSON.stringify(error).includes('secret-test') && !error.message.includes('secret-test'));
 });
 
 test('media dikirim dengan URL HTTPS sesuai tipe dan status diperiksa sebelum publikasi', async () => {
