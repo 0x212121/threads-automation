@@ -10,6 +10,7 @@ import { PublicationRequests } from '../src/publication-requests.js';
 import { ThreadsPublisher } from '../src/threads-publisher.js';
 import { processPublication } from '../src/publication-worker.js';
 import { repairFirstReplyTarget } from '../src/threads-reference-repair.js';
+import { findFirstPostCandidates } from '../src/threads-first-post-search.js';
 
 test('pemulihan ID memakai permalink terverifikasi, menolak kondisi tidak aman dan tidak mengulang posting pertama',async()=>{
   const db=new PGlite();
@@ -45,6 +46,8 @@ test('pemulihan ID memakai permalink terverifikasi, menolak kondisi tidak aman d
       return Response.json({error:{code:100,error_subcode:33,message:'token-rahasia'}},{status:400});
     }) as typeof fetch;
     assert.deepEqual(await repairFirstReplyTarget(pool,vault,job.id,permalink,false,fetcher),{status:'ready_to_repair',part:2});
+    const search=await findFirstPostCandidates(pool,vault,job.id,fetcher);
+    assert.equal(search.status,'ok');assert.equal(search.candidates?.length,1);assert.equal(search.candidates?.[0]?.matchesText,true);assert.equal(search.candidates?.[0]?.permalink,permalink);
     assert.equal((await db.query('SELECT * FROM publication_reference_repairs')).rows.length,0);
     provider.text='Different';assert.equal((await repairFirstReplyTarget(pool,vault,job.id,permalink,true,fetcher)).status,'content_mismatch');provider.text='Approved root';
     const timestamp=provider.timestamp;provider.timestamp='2000-01-01T00:00:00Z';

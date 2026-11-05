@@ -82,6 +82,14 @@ docker compose exec -T app npm run check-threads-permissions -- --job UUID-PEKER
 
 ## 8. Memulihkan referensi posting pertama yang berbeda
 
+Untuk mencari posting asli di sekitar waktu pekerjaan sebelum memilih tautan pemulihan, jalankan:
+
+```bash
+docker compose exec -T app npm run check-threads-permissions -- --job UUID-PEKERJAAN --find-first-post
+```
+
+Bagian `firstPostSearch.candidates` memuat tautan posting, timestamp UTC dan waktu dalam zona pekerjaan, serta penanda kecocokan teks, jenis media, dan ID yang tercatat. Isi posting dan token tidak ditampilkan. Pencarian memakai rentang persiapan pertama hingga sukses pertama dengan toleransi lima menit, parameter waktu Meta, serta penyaringan waktu di server. Hasil diurutkan dari waktu terdekat, dibatasi lima halaman dan 20 kandidat; `complete: false` menunjukkan pencarian tidak selesai. Kandidat kosong tidak membuktikan posting telah dihapus. Perintah hanya membaca data, tidak mengganti target, dan tidak memilih kandidat secara otomatis.
+
 Jika `recordedIdMatches` false dan `matchedPostReadable` true, penyebab langsung sudah teridentifikasi sebagai perbedaan referensi; ini belum menjelaskan asal perbedaan tersebut. Operator dapat menggunakan pemulihan berikut setelah menerapkan migrasi terbaru:
 
 ```bash
