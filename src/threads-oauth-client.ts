@@ -11,7 +11,7 @@ export class ThreadsOAuthClient {
   }
   authorizationUrl(state: string): string {
     if (!/^[A-Za-z0-9_-]{43}$/.test(state)) throw new ThreadsOAuthError('State OAuth tidak valid.');
-    const url = new URL('https://threads.net/oauth/authorize');
+    const url = new URL('https://www.threads.com/oauth/authorize');
     url.search = new URLSearchParams({ client_id: this.config.appId, redirect_uri: this.config.redirectUri, scope: 'threads_basic,threads_content_publish', response_type: 'code', state }).toString();
     return url.toString();
   }

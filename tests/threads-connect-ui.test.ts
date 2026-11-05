@@ -8,14 +8,17 @@ async function waitFor(check: () => boolean) {
   while (!check()) { if (Date.now() > deadline) throw new Error('Status koneksi tidak diperbarui.'); await new Promise(resolve => setTimeout(resolve, 10)); }
 }
 
-for (const scenario of ['ready', 'unverified', 'missing-config', 'server-error', 'verified-elsewhere'] as const) {
+for (const scenario of ['ready', 'unverified', 'missing-config', 'server-error', 'verified-elsewhere', 'missing-client-id'] as const) {
   test(`klik koneksi Threads: ${scenario}`, async () => {
     const [html, script] = await Promise.all([readFile('public/index.html', 'utf8'), readFile('public/app.js', 'utf8')]);
     const dom = new JSDOM(html, { url: 'https://example.test', runScripts: 'outside-only', virtualConsole: new VirtualConsole() });
     try {
       let clicks = false;
       const calls: string[] = [];
-      const authorizationUrl = 'https://threads.net/oauth/authorize?client_id=123&state=test-state';
+      const target = new URL('https://www.threads.com/oauth/authorize');
+      target.search = new URLSearchParams({ client_id: '123', state: 'a'.repeat(43), response_type: 'code', redirect_uri: 'https://example.test/api/threads/oauth/callback', scope: 'threads_basic,threads_content_publish' }).toString();
+      if (scenario === 'missing-client-id') target.searchParams.delete('client_id');
+      const authorizationUrl = target.toString();
       dom.window.fetch = (async (path: string, init?: RequestInit) => {
         calls.push(path);
         let value: unknown = {}, status = 200;
@@ -46,8 +49,8 @@ for (const scenario of ['ready', 'unverified', 'missing-config', 'server-error',
       } else {
         assert.equal(get('#threads-connect-error').hidden, false);
         assert.equal(get('#continue-threads').hidden, true);
-        assert.match(get('#threads-connect-error').textContent ?? '', scenario === 'unverified' ? /Verifikasi email/ : scenario === 'missing-config' ? /THREADS_APP_ID/ : /tidak tersedia/);
-        assert.equal(calls.filter(path => path === '/api/threads/oauth/start').length, scenario === 'server-error' ? 1 : 0);
+        assert.match(get('#threads-connect-error').textContent ?? '', scenario === 'unverified' ? /Verifikasi email/ : scenario === 'missing-config' ? /THREADS_APP_ID/ : scenario === 'missing-client-id' ? /Parameter otorisasi/ : /tidak tersedia/);
+        assert.equal(calls.filter(path => path === '/api/threads/oauth/start').length, scenario === 'server-error' || scenario === 'missing-client-id' ? 1 : 0);
       }
     } finally { dom.window.close(); }
   });

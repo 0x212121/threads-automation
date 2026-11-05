@@ -14,7 +14,10 @@ test('OAuth menyusun izin minimum dan memeriksa identitas dari respons Meta', as
   }) as typeof fetch;
   const client = new ThreadsOAuthClient({ appId: '1234', appSecret: 'secret-test', redirectUri: 'https://example.test/auth/callback' }, fetcher);
   const url = new URL(client.authorizationUrl('a'.repeat(43)));
-  assert.equal(url.hostname, 'threads.net');
+  assert.equal(url.hostname, 'www.threads.com');
+  assert.equal(url.searchParams.get('client_id'), '1234');
+  assert.equal(url.searchParams.get('response_type'), 'code');
+  assert.equal(url.searchParams.get('state'), 'a'.repeat(43));
   assert.equal(url.searchParams.get('scope'), 'threads_basic,threads_content_publish');
   assert.equal(url.searchParams.get('redirect_uri'), 'https://example.test/auth/callback');
   assert.equal(url.toString().includes('secret-test'), false);

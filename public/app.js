@@ -226,7 +226,9 @@ $('#connect-threads').addEventListener('click', async () => {
     if (!threadsConfigured) throw new Error('Konfigurasi Threads belum tersedia. Atur THREADS_APP_ID, THREADS_APP_SECRET, dan THREADS_TOKEN_KEY, lalu buat ulang container aplikasi.');
     const result = await api('/api/threads/oauth/start', { method: 'POST' });
     const url = new URL(result.authorizationUrl);
-    if (url.protocol !== 'https:' || url.hostname !== 'threads.net' || url.pathname !== '/oauth/authorize' || url.username || url.password || url.port) throw new Error('Alamat otorisasi Threads tidak valid.');
+    const allowedHosts = ['www.threads.com', 'threads.com', 'www.threads.net', 'threads.net'];
+    if (url.protocol !== 'https:' || !allowedHosts.includes(url.hostname) || url.pathname !== '/oauth/authorize' || url.username || url.password || url.port || url.hash) throw new Error('Alamat otorisasi Threads tidak valid.');
+    if (!/^[0-9]+$/.test(url.searchParams.get('client_id') || '') || url.searchParams.get('response_type') !== 'code' || !/^[A-Za-z0-9_-]{43}$/.test(url.searchParams.get('state') || '') || url.searchParams.get('redirect_uri') !== `${location.origin}/api/threads/oauth/callback`) throw new Error('Parameter otorisasi Threads tidak lengkap atau callback berbeda. Periksa konfigurasi aplikasi di server.');
     link.href = url.toString(); link.hidden = false;
     window.location.assign(url.toString());
   } catch (error) { errorAt('#threads-connect-error', error.message); }

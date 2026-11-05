@@ -68,6 +68,8 @@ Klien OAuth Threads membangun URL otorisasi, menukar kode dan memeriksa profil t
 
 Tombol koneksi admin memeriksa ulang status pengguna dan konfigurasi saat diklik. Jika syarat belum terpenuhi, tampilkan alasan di panel; jika siap, minta URL OAuth melalui POST ber-CSRF dan pindah ke URL Threads HTTPS yang tervalidasi. Tautan lanjut tersedia setelah URL diterima sebagai alternatif bila navigasi otomatis tidak terjadi.
 
+URL otorisasi dibuat langsung pada `https://www.threads.com/oauth/authorize`, tujuan redirect yang diamati pada 5 November 2026. Browser memeriksa `client_id`, `response_type`, state dan callback sebelum navigasi. Domain Threads lama masih diterima untuk kompatibilitas saat frontend dan backend diperbarui bertahap. Perubahan domain ini mengurangi redirect dan belum membuktikan penyebab error Meta tertentu.
+
 Kegagalan sebelum pengiriman publikasi dicatat sebagai kode diagnosis terbatas yang aman ditampilkan, tanpa menyimpan pesan mentah Meta. Kegagalan setelah pengiriman tetap dianggap belum pasti dan tidak diulang otomatis. Permintaan pembuatan kontainer dan publikasi memakai parameter sebagaimana contoh koleksi resmi Meta.
 
 Retensi minimal 90 hari perlu diterjemahkan per jenis data, termasuk log, media, post, audit dan backup, dengan kebijakan penghapusan dan kapasitas 20 GB. Backup dan restore harus diuji; RPO/RTO belum ditetapkan. Monitoring minimal mencakup worker, antrean, keterlambatan, status integrasi, kegagalan notifikasi dan kapasitas. Sediakan prosedur pemulihan serta konfigurasi self-hosting yang dapat direproduksi.

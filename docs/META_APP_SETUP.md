@@ -31,3 +31,9 @@ Panduan awal, diperiksa 5 November 2026. Nama menu dan persyaratan Meta dapat be
 4. Periksa identitas akun dan status koneksi dengan akun uji yang berwenang. Konfirmasi persyaratan Meta untuk mode aplikasi, termasuk App Review jika berlaku. Jangan menganggap akses akun uji otomatis berlaku untuk semua pengguna.
 
 **Jangan kirim App Secret atau token kepada asisten**; jika pengujian gagal, berikan pesan kesalahan tanpa data sensitif. Pengujian API Meta nyata, pengelolaan masa berlaku token dan penerbitan media masih belum selesai. Lihat README untuk mengaktifkan worker pengujian dan menangani hasil yang belum pasti.
+
+## 5. Error App ID saat otorisasi
+
+Jika Meta menampilkan `4476002`, periksa parameter `client_id` pada permintaan otorisasi yang dibuat aplikasi, bukan hanya isi file `.env`. Environment Linux peka huruf besar/kecil: aplikasi membaca `THREADS_APP_ID`. Setelah mengubah konfigurasi Compose, buat ulang container; restart saja tidak menerapkan environment baru. Gunakan pasangan ID/secret khusus Threads. App Secret baru dipakai setelah callback untuk pertukaran kode dan tidak dikirim ke halaman otorisasi browser.
+
+Domain otorisasi langsung saat ini adalah `https://www.threads.com/oauth/authorize`. Uji HTTP pada 5 November 2026 menunjukkan domain `threads.net` mengarah ke domain tersebut dan tetap membawa `client_id`; perpindahan domain saja belum membuktikan penyebab error. Jangan membagikan URL OAuth lengkap karena memuat state sesi. Jika parameter sudah cocok, periksa peran akun uji dan status undangannya serta konfigurasi use case di dashboard Meta.
