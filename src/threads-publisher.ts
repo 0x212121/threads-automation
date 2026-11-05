@@ -1,7 +1,9 @@
 export class ContainerCreationError extends Error {
   constructor(message: string, readonly retryable: boolean = false, readonly reason: 'meta_auth' | 'meta_rejected' | 'meta_unavailable' = 'meta_rejected', readonly httpStatus?: number, readonly metaCode?: number, readonly metaSubcode?: number, readonly operation: 'create_container' | 'read_reply_target' = 'create_container') { super(message); }
 }
-export class PublicationUncertainError extends Error {}
+export class PublicationUncertainError extends Error {
+  constructor(message:string,readonly reason:'provider_rejected'|'invalid_response'|'transport'='transport',readonly httpStatus?:number,readonly metaCode?:number,readonly metaSubcode?:number) {super(message);}
+}
 
 // No retry is safe after a publish request may have left the process.
 export class ThreadsPublisher {
@@ -85,10 +87,13 @@ export class ThreadsPublisher {
       const url = new URL('https://graph.threads.net/me/threads_publish');
       url.searchParams.set('creation_id', containerId);
       const response = await this.request(url.toString(), { method: 'POST', headers: { Authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(15000) });
-      if (!response.ok) throw new Error();
+      if (!response.ok) {
+        const failure=await this.rejection(response,'create_container',false);
+        throw new PublicationUncertainError('Hasil publikasi belum pasti.','provider_rejected',response.status,failure.metaCode,failure.metaSubcode);
+      }
       const value: unknown = await response.json();
-      if (!value || typeof value !== 'object' || typeof (value as { id?: unknown }).id !== 'string' || !/^[0-9]+$/.test((value as { id: string }).id)) throw new Error();
+      if (!value || typeof value !== 'object' || typeof (value as { id?: unknown }).id !== 'string' || !/^[0-9]+$/.test((value as { id: string }).id)) throw new PublicationUncertainError('Respons publikasi tidak dapat dipastikan.','invalid_response',response.status);
       return (value as { id: string }).id;
-    } catch { throw new PublicationUncertainError('Hasil publikasi belum pasti. Periksa Threads sebelum mencoba ulang.'); }
+    } catch (error) { if (error instanceof PublicationUncertainError) throw error; throw new PublicationUncertainError('Hasil publikasi belum pasti. Periksa Threads sebelum mencoba ulang.'); }
   }
 }

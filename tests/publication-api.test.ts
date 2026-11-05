@@ -15,7 +15,7 @@ import { ThreadsPublisher } from '../src/threads-publisher.js';
 
 test('API menjadwalkan draft yang disetujui, memeriksa CSRF dan membatalkan sebelum diklaim', async () => {
   const db = new PGlite();
-  for (const name of ['001_content.sql','002_local_identity.sql','006_password_reset.sql','007_threads_accounts.sql','013_token_refresh.sql','009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql','010_publication_resolutions.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
+  for (const name of ['001_content.sql','002_local_identity.sql','006_password_reset.sql','007_threads_accounts.sql','013_token_refresh.sql','009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql','017_publication_failure_details.sql','010_publication_resolutions.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
   const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.rows.length }; };
   const pool = { query, connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
   const user='11111111-1111-4111-8111-111111111111', hash = await hashPassword('kata sandi untuk pengujian');
@@ -47,9 +47,15 @@ test('API menjadwalkan draft yang disetujui, memeriksa CSRF dan membatalkan sebe
   await agent.post(`/api/posts/${post2}/approve`).set('Origin',origin).set('X-CSRF-Token',csrf).send({revision:2});
   assert.equal((await agent.post(`/api/posts/${post2}/publish-now`).set('Origin',origin).set('X-CSRF-Token',csrf).send({revision:3,timeZone:'UTC'})).status,201);
   let calls=0;
-  const publisher=new ThreadsPublisher((async () => new Response(JSON.stringify({id:++calls===1?'12345':'67890'}),{status:200})) as typeof fetch);
+  const publisher=new ThreadsPublisher((async(input:string|URL|Request) => {
+    calls++;const url=new URL(String(input));
+    return url.searchParams.get('fields')==='status' ? Response.json({status:'FINISHED'}) : Response.json({id:url.pathname==='/me/threads'?'12345':'67890'});
+  }) as typeof fetch);
+  assert.equal(await processPublication(new PublicationQueue(pool),new TokenVault(Buffer.alloc(32,7)),publisher),true);
+  assert.equal((await agent.get('/api/posts')).body.posts.find((row:{id:string})=>row.id===post2).job_status,'prepared');
+  await query("UPDATE publication_jobs SET next_attempt_at=now() WHERE post_id=$1",[post2]);
   assert.equal(await processPublication(new PublicationQueue(pool),new TokenVault(Buffer.alloc(32,7)),publisher),true);
   const published=(await agent.get('/api/posts')).body.posts.find((row: { id: string }) => row.id===post2);
-  assert.equal(published.job_status,'published'); assert.equal(published.published_id,'67890'); assert.equal(calls,2);
+  assert.equal(published.job_status,'published'); assert.equal(published.published_id,'67890'); assert.equal(calls,3);
   await db.close();
 });

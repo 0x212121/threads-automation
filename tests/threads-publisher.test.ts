@@ -58,7 +58,7 @@ test('target balasan diperiksa dan kode 24/4279009 hanya dapat diulang sebelum p
   assert.equal(calls[0]?.pathname,'/123'); assert.equal(calls[0]?.searchParams.get('fields'),'id');
   await assert.rejects(unavailable.createTextContainer('secret-test','Isi','123'),error => error instanceof ContainerCreationError && error.retryable && error.operation==='create_container');
   await assert.rejects(unavailable.createTextContainer('secret-test','Isi'),error => error instanceof ContainerCreationError && !error.retryable);
-  await assert.rejects(unavailable.publishContainer('secret-test','123'),PublicationUncertainError);
+  await assert.rejects(unavailable.publishContainer('secret-test','123'),error=>error instanceof PublicationUncertainError && error.reason==='provider_rejected' && error.httpStatus===400 && error.metaCode===24 && error.metaSubcode===4279009 && !JSON.stringify(error).includes('secret-test'));
   assert.equal(calls.filter(url=>url.pathname==='/me/threads_publish').length,1);
   const readable=new ThreadsPublisher((async () => Response.json({id:'123'})) as typeof fetch);
   await readable.checkReplyTarget('secret-test','123');

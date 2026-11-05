@@ -13,7 +13,7 @@ import { verifyPublishedPart } from '../src/verify-published-part.js';
 
 test('rangkaian berhenti saat hasil balasan tidak pasti dan melanjutkan tanpa mengulang bagian sebelumnya', async () => {
   const db=new PGlite();
-  for (const name of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql','010_publication_resolutions.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql']) await db.exec(await readFile(`db/migrations/${name}`,'utf8'));
+  for (const name of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql','010_publication_resolutions.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql','017_publication_failure_details.sql']) await db.exec(await readFile(`db/migrations/${name}`,'utf8'));
   const query=async (sql:string,params?:unknown[]) => { const result=await db.query(sql,params); return {...result,rowCount:result.rows.length || result.affectedRows || 0}; };
   const pool={query,connect:async()=>({query,release:()=>{}})} as unknown as Pool;
   const owner='11111111-1111-4111-8111-111111111111',account='22222222-2222-4222-8222-222222222222';
@@ -25,22 +25,29 @@ test('rangkaian berhenti saat hasil balasan tidak pasti dan melanjutkan tanpa me
   await content.transition(actor,post.id,1,'submit'); await content.transition(actor,post.id,2,'approve');
   const requests=new PublicationRequests(pool), job=await requests.publishNow(owner,post.id,3,'UTC'), queue=new PublicationQueue(pool);
   const advance=async (jobId:string) => { await query('UPDATE publication_jobs SET next_attempt_at=now() WHERE id=$1',[jobId]); };
+  async function runPart(publisher:ThreadsPublisher):Promise<boolean> {
+    const processed=await processPublication(queue,vault,publisher);
+    const prepared=(await db.query<{id:string}>("SELECT id FROM publication_jobs WHERE status='prepared' AND lease_token IS NULL")).rows[0];
+    if (prepared) { await advance(prepared.id); await processPublication(queue,vault,publisher); }
+    return processed;
+  }
   const created: {text:string|null;reply:string|null}[]=[]; let publishes=0;
   const publisher=new ThreadsPublisher((async (input:string|URL|Request) => {
     const url=new URL(String(input));
+    if (url.searchParams.get('fields')==='status') return Response.json({status:'FINISHED'});
     if (/^\/[0-9]+$/.test(url.pathname)) return Response.json({id:url.pathname.slice(1)});
     if (url.pathname==='/me/threads') { created.push({text:url.searchParams.get('text'),reply:url.searchParams.get('reply_to_id')}); return Response.json({id:String(100+created.length)}); }
     if (url.pathname==='/me/threads_publish') { publishes++; if (publishes===2) throw new Error('timeout'); return Response.json({id:String(200+publishes)}); }
     throw new Error('Unexpected request');
   }) as typeof fetch);
-  assert.equal(await processPublication(queue,vault,publisher),true);
+  assert.equal(await runPart(publisher),true);
   assert.equal(await queue.claim(),null);
   assert.equal((await db.query<{delay:number}>('SELECT extract(epoch from (next_attempt_at-updated_at))::int AS delay FROM publication_jobs WHERE id=$1',[job.id])).rows[0]?.delay,30);
   await advance(job.id);
-  assert.equal(await processPublication(queue,vault,publisher),true);
+  assert.equal(await runPart(publisher),true);
   assert.equal((await db.query<{status:string}>('SELECT status FROM publication_jobs WHERE id=$1',[job.id])).rows[0]?.status,'uncertain');
   assert.deepEqual(created,[{text:'Awal',reply:null},{text:'Kedua',reply:'201'}]);
-  assert.equal(await processPublication(queue,vault,publisher),false);
+  assert.equal(await runPart(publisher),false);
   await assert.rejects(requests.publishNow(owner,post.id,3,'UTC'),/Sebagian rangkaian sudah terbit/);
   await assert.rejects(content.edit(actor,post.id,3,{body:'edit'}),/publikasi aktif/);
   await assert.rejects(requests.resolveUncertain(owner,post.id,3,job.id,'published'),/ID posting/);
@@ -53,7 +60,7 @@ test('rangkaian berhenti saat hasil balasan tidak pasti dan melanjutkan tanpa me
   assert.equal(await verifyPublishedPart(pool,vault,owner,post.id,job.id,'202',wrongParent),false);
   await requests.resolveUncertain(owner,post.id,3,job.id,'published','202');
   await requests.resume(owner,post.id,3,job.id);
-  assert.equal(await processPublication(queue,vault,publisher),true);
+  assert.equal(await runPart(publisher),true);
   assert.deepEqual(created[2],{text:'Ketiga',reply:'202'});
   assert.equal(created.length,3); assert.equal(publishes,3);
   assert.equal((await db.query<{status:string}>('SELECT status FROM publication_jobs WHERE id=$1',[job.id])).rows[0]?.status,'published');
@@ -64,15 +71,16 @@ test('rangkaian berhenti saat hasil balasan tidak pasti dan melanjutkan tanpa me
   let tries=0, roots=0;
   const retryPublisher=new ThreadsPublisher((async (input:string|URL|Request) => {
     const url=new URL(String(input));
+    if (url.searchParams.get('fields')==='status') return Response.json({status:'FINISHED'});
     if (/^\/[0-9]+$/.test(url.pathname)) return Response.json({id:url.pathname.slice(1)});
     if (url.pathname==='/me/threads') { if (!url.searchParams.has('reply_to_id')) roots++; return Response.json({id:String(300+ ++tries)}); }
     if (url.pathname==='/me/threads_publish') { if (tries===2) throw new Error('timeout'); return Response.json({id:String(400+tries)}); }
     throw new Error('Unexpected request');
   }) as typeof fetch);
-  await processPublication(queue,vault,retryPublisher); await advance(job2.id); await processPublication(queue,vault,retryPublisher);
+  await runPart(retryPublisher); await advance(job2.id); await runPart(retryPublisher);
   await requests.resolveUncertain(owner,post2.id,3,job2.id,'not_published');
   await requests.resume(owner,post2.id,3,job2.id);
-  await processPublication(queue,vault,retryPublisher);
+  await runPart(retryPublisher);
   assert.equal(roots,1); assert.equal(tries,3);
   assert.equal((await db.query<{status:string}>('SELECT status FROM publication_jobs WHERE id=$1',[job2.id])).rows[0]?.status,'published');
   const post3=await content.create(actor,{body:'Satu',replies:['Dua'],destinationAccountId:account});
@@ -81,6 +89,7 @@ test('rangkaian berhenti saat hasil balasan tidak pasti dan melanjutkan tanpa me
   let creates=0, deny=true;
   const permissionPublisher=new ThreadsPublisher((async (input:string|URL|Request) => {
     const url=new URL(String(input));
+    if (url.searchParams.get('fields')==='status') return Response.json({status:'FINISHED'});
     if (/^\/[0-9]+$/.test(url.pathname)) return Response.json({id:url.pathname.slice(1)});
     if (url.pathname==='/me/threads') { creates++; if (creates===2 && deny) return Response.json({error:{code:10,error_subcode:42,message:'test-token teks rahasia'}},{status:403}); return Response.json({id:String(500+creates)}); }
     return Response.json({id:String(600+creates)});
@@ -88,13 +97,13 @@ test('rangkaian berhenti saat hasil balasan tidak pasti dan melanjutkan tanpa me
   const warnings:string[]=[]; const originalWarn=console.warn;
   try {
     console.warn=(message?:unknown) => { warnings.push(String(message)); };
-    await processPublication(queue,vault,permissionPublisher); await advance(job3.id); await processPublication(queue,vault,permissionPublisher);
+    await runPart(permissionPublisher); await advance(job3.id); await runPart(permissionPublisher);
   } finally { console.warn=originalWarn; }
   const rejected=(await db.query<{status:string;failure_code:string}>('SELECT status,failure_code FROM publication_jobs WHERE id=$1',[job3.id])).rows[0];
   assert.equal(rejected?.status,'needs_action'); assert.equal(rejected?.failure_code,'meta_auth');
   assert.equal(warnings.length,1); assert.equal(warnings[0]?.includes('test-token'),false); assert.equal(warnings[0]?.includes('teks rahasia'),false);
   assert.deepEqual(JSON.parse(warnings[0]!),{event:'threads_container_rejected',jobId:job3.id,part:2,operation:'create_container',retryable:false,httpStatus:403,metaCode:10,metaSubcode:42});
-  deny=false; await requests.resume(owner,post3.id,3,job3.id); await processPublication(queue,vault,permissionPublisher);
+  deny=false; await requests.resume(owner,post3.id,3,job3.id); await runPart(permissionPublisher);
   assert.equal(creates,3); assert.equal((await db.query<{status:string}>('SELECT status FROM publication_jobs WHERE id=$1',[job3.id])).rows[0]?.status,'published');
   const post4=await content.create(actor,{body:'Induk',replies:['Balasan tertunda'],destinationAccountId:account});
   await content.transition(actor,post4.id,1,'submit'); await content.transition(actor,post4.id,2,'approve');
@@ -102,6 +111,7 @@ test('rangkaian berhenti saat hasil balasan tidak pasti dan melanjutkan tanpa me
   let rootCreates=0, targetReads=0, replyCreates=0, completed=0;
   const propagationPublisher=new ThreadsPublisher((async (input:string|URL|Request) => {
     const url=new URL(String(input));
+    if (url.searchParams.get('fields')==='status') return Response.json({status:'FINISHED'});
     if (/^\/[0-9]+$/.test(url.pathname)) {
       targetReads++;
       return targetReads===1 ? Response.json({error:{code:24,error_subcode:4279009}},{status:400}) : Response.json({id:url.pathname.slice(1)});
@@ -114,19 +124,19 @@ test('rangkaian berhenti saat hasil balasan tidak pasti dan melanjutkan tanpa me
     }
     completed++; return Response.json({id:completed===1?'801':'802'});
   }) as typeof fetch);
-  await processPublication(queue,vault,propagationPublisher);
+  await runPart(propagationPublisher);
   await advance(job4.id);
   try {
     console.warn=(message?:unknown)=>{warnings.push(String(message));};
     for (let attempt=0; attempt<2; attempt++) {
-      await processPublication(queue,vault,propagationPublisher);
+      await runPart(propagationPublisher);
       const state=(await db.query<{status:string;part_index:number;reply_to_id:string;delay:number}>('SELECT status,part_index,reply_to_id,extract(epoch from (next_attempt_at-updated_at))::int AS delay FROM publication_jobs WHERE id=$1',[job4.id])).rows[0];
       assert.equal(state?.status,'scheduled'); assert.equal(state?.part_index,1); assert.equal(state?.reply_to_id,'801'); assert.ok(state!.delay>=30);
       assert.equal(completed,1); assert.equal(await queue.claim(),null);
       await advance(job4.id);
     }
   } finally {console.warn=originalWarn;}
-  await processPublication(queue,vault,propagationPublisher);
+  await runPart(propagationPublisher);
   assert.equal(rootCreates,1); assert.equal(replyCreates,2); assert.equal(completed,2);
   assert.equal((await db.query<{status:string}>('SELECT status FROM publication_jobs WHERE id=$1',[job4.id])).rows[0]?.status,'published');
   const post5=await content.create(actor,{body:'Induk terakhir',replies:['Target tetap tidak tersedia'],destinationAccountId:account});
@@ -135,13 +145,14 @@ test('rangkaian berhenti saat hasil balasan tidak pasti dan melanjutkan tanpa me
   let deadlinePublishes=0;
   const deadlinePublisher=new ThreadsPublisher((async (input:string|URL|Request) => {
     const url=new URL(String(input));
+    if (url.searchParams.get('fields')==='status') return Response.json({status:'FINISHED'});
     if (/^\/[0-9]+$/.test(url.pathname)) return Response.json({error:{code:24,error_subcode:4279009}},{status:400});
     if (url.pathname==='/me/threads') return Response.json({id:'901'});
     deadlinePublishes++; return Response.json({id:'902'});
   }) as typeof fetch);
-  await processPublication(queue,vault,deadlinePublisher);
+  await runPart(deadlinePublisher);
   await query("UPDATE publication_jobs SET scheduled_at=now()-interval '59 minutes 50 seconds',next_attempt_at=now() WHERE id=$1",[job5.id]);
-  try {console.warn=()=>{}; await processPublication(queue,vault,deadlinePublisher);} finally {console.warn=originalWarn;}
+  try {console.warn=()=>{}; await runPart(deadlinePublisher);} finally {console.warn=originalWarn;}
   assert.equal((await db.query<{status:string}>('SELECT status FROM publication_jobs WHERE id=$1',[job5.id])).rows[0]?.status,'needs_action');
   assert.equal(await queue.claim(),null); assert.equal(deadlinePublishes,1);
   await db.close();

@@ -12,7 +12,7 @@ import { ThreadsAccounts } from '../src/threads-accounts.js';
 
 test('anggota aktif dapat melihat draft tim dan membuat draft melalui sesi dengan CSRF', async () => {
   const db = new PGlite();
-  for (const migration of ['001_content.sql', '002_local_identity.sql', '006_password_reset.sql', '007_threads_accounts.sql','013_token_refresh.sql', '009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql']) await db.exec(await readFile(`db/migrations/${migration}`, 'utf8'));
+  for (const migration of ['001_content.sql', '002_local_identity.sql', '006_password_reset.sql', '007_threads_accounts.sql','013_token_refresh.sql', '009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql','017_publication_failure_details.sql']) await db.exec(await readFile(`db/migrations/${migration}`, 'utf8'));
   const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.affectedRows ?? result.rows.length }; };
   const pool = { query, connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
   const password = 'kata sandi untuk pengujian';

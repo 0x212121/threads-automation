@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 
 type Job = { id: string; post_id: string; content_version: number; account_id: string; requested_by: string; status: 'preparing' | 'prepared'; lease_token: string; container_id: string | null; part_index: number; reply_to_id: string | null };
 export type PublicationPayload = { body: string; media_id: string | null; media_kind: 'IMAGE' | 'VIDEO' | null; threads_user_id: string; encrypted_token: Buffer; token_iv: Buffer; token_tag: Buffer };
+export type PublicationFailure = {reason:'provider_rejected'|'invalid_response'|'transport'|'persistence';httpStatus?:number;metaCode?:number;metaSubcode?:number};
 
 export class PublicationQueue {
   constructor(private readonly pool: Pool) {}
@@ -34,10 +35,10 @@ export class PublicationQueue {
     });
   }
 
-  async markPrepared(jobId: string, lease: string, containerId: string): Promise<boolean> {
+  async markPrepared(jobId: string, lease: string, containerId: string, waitForProcessing=false): Promise<boolean> {
     if (!/^[0-9]+$/.test(containerId)) throw new Error('ID container tidak valid.');
     return this.transaction(async client => {
-      const updated = await client.query("UPDATE publication_jobs SET status='prepared',container_id=$3,updated_at=now() WHERE id=$1 AND lease_token=$2 AND status='preparing' AND lease_until>now() RETURNING id", [jobId, lease, containerId]);
+      const updated = await client.query("UPDATE publication_jobs SET status='prepared',container_id=$3,next_attempt_at=CASE WHEN $4::boolean THEN now()+interval '30 seconds' ELSE next_attempt_at END,lease_token=CASE WHEN $4::boolean THEN NULL ELSE lease_token END,lease_until=CASE WHEN $4::boolean THEN NULL ELSE lease_until END,updated_at=now() WHERE id=$1 AND lease_token=$2 AND status='preparing' AND lease_until>now() RETURNING id", [jobId, lease, containerId,waitForProcessing]);
       if (!updated.rowCount) return false;
       await client.query("INSERT INTO publication_attempts (id,job_id,stage,outcome) VALUES ($1,$2,'prepare','succeeded')", [randomUUID(), jobId]);
       return true;
@@ -98,8 +99,8 @@ export class PublicationQueue {
     if (!/^[0-9]+$/.test(publishedId)) throw new Error('ID publikasi tidak valid.');
     return this.finish(jobId, lease, 'published', publishedId);
   }
-  async markUncertain(jobId: string, lease: string): Promise<boolean> { return this.finish(jobId, lease, 'uncertain', null); }
-  private async finish(jobId: string, lease: string, status: 'published' | 'uncertain', publishedId: string | null): Promise<boolean> {
+  async markUncertain(jobId: string, lease: string, failure?:PublicationFailure): Promise<boolean> { return this.finish(jobId, lease, 'uncertain', null,failure); }
+  private async finish(jobId: string, lease: string, status: 'published' | 'uncertain', publishedId: string | null,failure?:PublicationFailure): Promise<boolean> {
     return this.transaction(async client => {
       const locked = await client.query<{post_id:string;content_version:number;part_index:number}>("SELECT post_id,content_version,part_index FROM publication_jobs WHERE id=$1 AND lease_token=$2 AND status='publishing' FOR UPDATE",[jobId,lease]);
       const job=locked.rows[0]; if (!job) return false;
@@ -107,7 +108,7 @@ export class PublicationQueue {
       const next = status === 'published' ? await client.query('SELECT position FROM content_version_replies WHERE post_id=$1 AND version=$2 AND position=$3',[job.post_id,job.content_version,job.part_index+1]) : null;
       if (next?.rowCount) await client.query("UPDATE publication_jobs SET status='preparing',part_index=part_index+1,reply_to_id=$2,container_id=NULL,next_attempt_at=now()+interval '30 seconds',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1",[jobId,publishedId]);
       else await client.query("UPDATE publication_jobs SET status=$2,published_id=CASE WHEN $2='published' THEN (SELECT published_id FROM publication_parts WHERE job_id=$1 AND position=0) ELSE NULL END,lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1",[jobId,status]);
-      await client.query('INSERT INTO publication_attempts (id,job_id,stage,outcome) VALUES ($1,$2,\'publish\',$3)', [randomUUID(), jobId, status === 'published' ? 'succeeded' : 'uncertain']);
+      await client.query('INSERT INTO publication_attempts (id,job_id,stage,outcome,failure_reason,failure_http_status,failure_meta_code,failure_meta_subcode) VALUES ($1,$2,\'publish\',$3,$4,$5,$6,$7)', [randomUUID(), jobId, status === 'published' ? 'succeeded' : 'uncertain',failure?.reason ?? null,failure?.httpStatus ?? null,failure?.metaCode ?? null,failure?.metaSubcode ?? null]);
       return true;
     });
   }

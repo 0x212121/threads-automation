@@ -10,7 +10,7 @@ import { TokenVault } from '../src/token-vault.js';
 
 test('worker menerbitkan satu kali dan tidak mengulang hasil yang tidak pasti', async () => {
   const db = new PGlite();
-  for (const name of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','013_token_refresh.sql','009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
+  for (const name of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','013_token_refresh.sql','009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql','017_publication_failure_details.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
   const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.rows.length }; };
   const pool = { query, connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
   const user='11111111-1111-4111-8111-111111111111', account='22222222-2222-4222-8222-222222222222';
@@ -28,17 +28,36 @@ test('worker menerbitkan satu kali dan tidak mengulang hasil yang tidak pasti', 
   }
   await addPost('33333333-3333-4333-8333-333333333333','44444444-4444-4444-8444-444444444444','55555555-5555-4555-8555-555555555555');
   let calls=0;
-  const ok = new ThreadsPublisher((async () => new Response(JSON.stringify({ id: ++calls === 1 ? '12345' : '67890' }), { status: 200 })) as typeof fetch);
+  const ok = new ThreadsPublisher((async (input:string|URL|Request) => {
+    calls++; const url=new URL(String(input));
+    return url.searchParams.get('fields')==='status' ? Response.json({status:'FINISHED'}) : Response.json({id:url.pathname==='/me/threads' ? '12345' : '67890'});
+  }) as typeof fetch);
   const queue = new PublicationQueue(pool);
   assert.equal(await processPublication(queue,vault,ok), true);
+  const ready=(await db.query<{status:string;delay:number;lease_token:string|null}>("SELECT status,extract(epoch from (next_attempt_at-updated_at))::int AS delay,lease_token FROM publication_jobs")).rows[0];
+  assert.deepEqual(ready,{status:'prepared',delay:30,lease_token:null});assert.equal(calls,1);
+  assert.equal(await processPublication(queue,vault,ok),false);
+  await db.query('UPDATE publication_jobs SET next_attempt_at=now()');
+  assert.equal(await processPublication(new PublicationQueue(pool),vault,ok),true);
   assert.equal((await db.query<{ status: string }>('SELECT status FROM publication_jobs')).rows[0]?.status,'published');
-  assert.equal(await processPublication(queue,vault,ok), false); assert.equal(calls,2);
+  assert.equal(await processPublication(queue,vault,ok), false); assert.equal(calls,3);
   await addPost('66666666-6666-4666-8666-666666666666','77777777-7777-4777-8777-777777777777','88888888-8888-4888-8888-888888888888');
   let errorCalls=0;
-  const uncertain = new ThreadsPublisher((async () => { if (++errorCalls === 1) return new Response(JSON.stringify({ id:'12346' }),{status:200}); throw new Error('timeout'); }) as typeof fetch);
+  const uncertain = new ThreadsPublisher((async (input:string|URL|Request) => {
+    errorCalls++; const url=new URL(String(input));
+    if (url.searchParams.get('fields')==='status') return Response.json({status:'FINISHED'});
+    if (url.pathname==='/me/threads') return Response.json({id:'12346'});
+    throw new Error('timeout token-test');
+  }) as typeof fetch);
   assert.equal(await processPublication(queue,vault,uncertain), true);
+  await db.query("UPDATE publication_jobs SET next_attempt_at=now() WHERE id='77777777-7777-4777-8777-777777777777'");
+  const warnings:string[]=[],warn=console.warn;
+  try {console.warn=(value?:unknown)=>{warnings.push(String(value));};await processPublication(queue,vault,uncertain);} finally {console.warn=warn;}
   assert.equal((await db.query<{ status: string }>("SELECT status FROM publication_jobs WHERE id='77777777-7777-4777-8777-777777777777'")).rows[0]?.status,'uncertain');
-  assert.equal(await processPublication(queue,vault,uncertain), false); assert.equal(errorCalls,2);
+  assert.equal(await processPublication(queue,vault,uncertain), false); assert.equal(errorCalls,3);
+  assert.deepEqual(JSON.parse(warnings[0]!),{event:'threads_publish_uncertain',jobId:'77777777-7777-4777-8777-777777777777',part:1,reason:'transport',httpStatus:null,metaCode:null,metaSubcode:null});
+  assert.doesNotMatch(warnings.join(''),/token-test/);
+  assert.equal((await db.query<{failure_reason:string}>("SELECT failure_reason FROM publication_attempts WHERE job_id='77777777-7777-4777-8777-777777777777' AND outcome='uncertain'")).rows[0]?.failure_reason,'transport');
   await addPost('99999999-9999-4999-8999-999999999999','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
   const transient = new ThreadsPublisher((async () => new Response('', { status: 503 })) as typeof fetch);
   assert.equal(await processPublication(queue,vault,transient), true);

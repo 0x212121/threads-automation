@@ -15,7 +15,7 @@ import { findFirstPostCandidates } from '../src/threads-first-post-search.js';
 test('pemulihan ID memakai permalink terverifikasi, menolak kondisi tidak aman dan tidak mengulang posting pertama',async()=>{
   const db=new PGlite();
   try {
-    for (const file of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql','010_publication_resolutions.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql']) await db.exec(await readFile(`db/migrations/${file}`,'utf8'));
+    for (const file of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql','010_publication_resolutions.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql','017_publication_failure_details.sql']) await db.exec(await readFile(`db/migrations/${file}`,'utf8'));
     const query=async(sql:string,params?:unknown[])=>{const r=await db.query(sql,params);return {...r,rowCount:r.rows.length || r.affectedRows || 0};};
     const pool={query,connect:async()=>({query,release:()=>{}})} as unknown as Pool;
     const user='11111111-1111-4111-8111-111111111111',account='22222222-2222-4222-8222-222222222222';
@@ -27,7 +27,12 @@ test('pemulihan ID memakai permalink terverifikasi, menolak kondisi tidak aman d
     await content.transition(actor,post.id,1,'submit');await content.transition(actor,post.id,2,'approve');
     const job=await requests.publishNow(user,post.id,3,'UTC');
     const oldId='18000000000000007',correctId='18000000000000009',containerId='18000000000000001';
-    const publisher=new ThreadsPublisher((async(input:string|URL|Request)=>Response.json({id:new URL(String(input)).pathname==='/me/threads' ? containerId : oldId})) as typeof fetch);
+    const publisher=new ThreadsPublisher((async(input:string|URL|Request)=>{
+      const url=new URL(String(input));
+      return url.searchParams.get('fields')==='status' ? Response.json({status:'FINISHED'}) : Response.json({id:url.pathname==='/me/threads' ? containerId : oldId});
+    }) as typeof fetch);
+    await processPublication(queue,vault,publisher);
+    await query('UPDATE publication_jobs SET next_attempt_at=now() WHERE id=$1',[job.id]);
     await processPublication(queue,vault,publisher);
     await query("UPDATE publication_jobs SET status='needs_action' WHERE id=$1",[job.id]);
     const permalink='https://www.threads.com/@tester/post/Original';
@@ -89,10 +94,13 @@ test('pemulihan ID memakai permalink terverifikasi, menolak kondisi tidak aman d
     let replyCreates=0;
     const next=new ThreadsPublisher((async(input:string|URL|Request)=>{
       const url=new URL(String(input));
+      if (url.searchParams.get('fields')==='status') return Response.json({status:'FINISHED'});
       if (url.pathname===`/${correctId}`) return Response.json({id:correctId});
       if (url.pathname==='/me/threads') {replyCreates++;assert.equal(url.searchParams.get('reply_to_id'),correctId);assert.equal(url.searchParams.get('text'),'Approved reply');return Response.json({id:'18000000000000011'});}
       assert.equal(url.pathname,'/me/threads_publish');return Response.json({id:'18000000000000013'});
     }) as typeof fetch);
+    await processPublication(queue,vault,next);
+    await query('UPDATE publication_jobs SET next_attempt_at=now() WHERE id=$1',[job.id]);
     await processPublication(queue,vault,next);
     assert.equal(replyCreates,1);assert.equal((await db.query<{status:string}>('SELECT status FROM publication_jobs WHERE id=$1',[job.id])).rows[0]?.status,'published');
   } finally {await db.close();}

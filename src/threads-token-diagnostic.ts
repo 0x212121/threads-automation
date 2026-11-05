@@ -21,6 +21,8 @@ function subcode(body:unknown): number|null {
   return typeof body.error.error_subcode==='number' && Number.isSafeInteger(body.error.error_subcode) ? body.error.error_subcode : null;
 }
 type LinkLookup = { status:string; scanned?:number; recordedIdMatches?:boolean; matchedPostReadable?:boolean; httpStatus?:number; metaCode?:number|null; metaSubcode?:number|null };
+type LastPublication = {outcome:string;reason:string|null;httpStatus:number|null;metaCode:number|null;metaSubcode:number|null};
+type ContainerDiagnostic = {status:string;httpStatus?:number;metaCode?:number|null;metaSubcode?:number|null};
 async function compareParentLink(request:typeof fetch, init:RequestInit, recordedId:string, link:string):Promise<LinkLookup> {
   const key=postKey(link); if (!key) return {status:'invalid_post_url'};
   let after:string|undefined,scanned=0;
@@ -49,17 +51,19 @@ async function compareParentLink(request:typeof fetch, init:RequestInit, recorde
   return {status:'not_found_in_scanned_posts',scanned};
 }
 
-export async function diagnoseReplyTarget(pool: Pool, vault: TokenVault, jobId:string, request:typeof fetch=fetch, parentUrl?:string): Promise<{status:string;part?:number;jobStatus?:string;parentMatchesHistory?:boolean;identityMatches?:boolean;parentReadable?:boolean;httpStatus?:number;metaCode?:number|null;metaSubcode?:number|null;permalinkLookup?:LinkLookup}> {
+export async function diagnoseReplyTarget(pool: Pool, vault: TokenVault, jobId:string, request:typeof fetch=fetch, parentUrl?:string): Promise<{status:string;part?:number;jobStatus?:string;parentMatchesHistory?:boolean;identityMatches?:boolean;parentReadable?:boolean;httpStatus?:number;metaCode?:number|null;metaSubcode?:number|null;permalinkLookup?:LinkLookup;lastPublication?:LastPublication;container?:ContainerDiagnostic}> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) return {status:'invalid_job'};
   if (parentUrl!==undefined && !postKey(parentUrl)) return {status:'invalid_post_url'};
   try {
-    const result=await pool.query<Omit<Account,'id'> & {account_id:string;part_index:number;job_status:string;reply_to_id:string|null;previous_published_id:string|null}>(`SELECT a.id AS account_id,a.username,a.threads_user_id,a.encrypted_token,a.token_iv,a.token_tag,
-      j.part_index,j.status AS job_status,j.reply_to_id,pp.published_id AS previous_published_id
+    const result=await pool.query<Omit<Account,'id'> & {account_id:string;part_index:number;job_status:string;reply_to_id:string|null;previous_published_id:string|null;container_id:string|null;last_publication:LastPublication|null}>(`SELECT a.id AS account_id,a.username,a.threads_user_id,a.encrypted_token,a.token_iv,a.token_tag,
+      j.part_index,j.status AS job_status,j.reply_to_id,j.container_id,pp.published_id AS previous_published_id,
+      (SELECT json_build_object('outcome',pa.outcome,'reason',pa.failure_reason,'httpStatus',pa.failure_http_status,'metaCode',pa.failure_meta_code,'metaSubcode',pa.failure_meta_subcode)
+       FROM publication_attempts pa WHERE pa.job_id=j.id AND pa.stage='publish' AND pa.outcome='uncertain' ORDER BY pa.created_at DESC LIMIT 1) AS last_publication
       FROM publication_jobs j JOIN threads_accounts a ON a.id=j.account_id
       LEFT JOIN publication_parts pp ON pp.job_id=j.id AND pp.position=j.part_index-1 AND pp.status='published'
       WHERE j.id=$1 AND a.status='active'`,[jobId]);
     const row=result.rows[0]; if (!row) return {status:'job_or_account_unavailable'};
-    const summary={part:row.part_index+1,jobStatus:row.job_status,parentMatchesHistory:!!row.reply_to_id && row.reply_to_id===row.previous_published_id};
+    const summary={part:row.part_index+1,jobStatus:row.job_status,parentMatchesHistory:!!row.reply_to_id && row.reply_to_id===row.previous_published_id,...(row.job_status==='uncertain' && row.last_publication ? {lastPublication:row.last_publication} : {})};
     if (!row.reply_to_id || !/^[0-9]+$/.test(row.reply_to_id)) return {status:'no_reply_target',...summary};
     const token=vault.open({ciphertext:row.encrypted_token,iv:row.token_iv,tag:row.token_tag},`${row.account_id}:${row.threads_user_id}`);
     const init={headers:{Authorization:`Bearer ${token}`}};
@@ -68,11 +72,21 @@ export async function diagnoseReplyTarget(pool: Pool, vault: TokenVault, jobId:s
     if (!me.body || typeof me.body!=='object' || !('id' in me.body) || typeof me.body.id!=='string') return {status:'identity_response_unexpected',...summary};
     const identityMatches=me.body.id===row.threads_user_id;
     if (!identityMatches) return {status:'identity_mismatch',...summary,identityMatches:false};
+    let container:ContainerDiagnostic|undefined;
+    if (row.job_status==='uncertain' && row.container_id && /^[0-9]+$/.test(row.container_id)) {
+      try {
+        const statusUrl=new URL(`https://graph.threads.net/${row.container_id}`);statusUrl.searchParams.set('fields','status');
+        const read=await requestJson(request,statusUrl,init);
+        const state=read.body && typeof read.body==='object' && 'status' in read.body ? read.body.status : null;
+        const status=read.status>=200 && read.status<300 && typeof state==='string' && ['FINISHED','IN_PROGRESS','ERROR','EXPIRED','PUBLISHED'].includes(state) ? state : 'unavailable';
+        container={status,httpStatus:read.status,metaCode:code(read.body),metaSubcode:subcode(read.body)};
+      } catch {container={status:'unavailable'};}
+    }
     const url=new URL(`https://graph.threads.net/${row.reply_to_id}`); url.searchParams.set('fields','id');
     const target=await requestJson(request,url,init);
     const parentReadable=target.status>=200 && target.status<300 && !!target.body && typeof target.body==='object' && 'id' in target.body && target.body.id===row.reply_to_id;
     const permalinkLookup=parentUrl ? await compareParentLink(request,init,row.reply_to_id,parentUrl) : undefined;
-    return {status:'ok',...summary,identityMatches,parentReadable,httpStatus:target.status,metaCode:code(target.body),metaSubcode:subcode(target.body),...(permalinkLookup ? {permalinkLookup} : {})};
+    return {status:'ok',...summary,identityMatches,parentReadable,httpStatus:target.status,metaCode:code(target.body),metaSubcode:subcode(target.body),...(permalinkLookup ? {permalinkLookup} : {}),...(container ? {container} : {})};
   } catch {return {status:'diagnostic_unavailable'};}
 }
 

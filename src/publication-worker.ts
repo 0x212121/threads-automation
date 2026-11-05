@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import { TokenVault } from './token-vault.js';
 import { PublicationQueue } from './publication-queue.js';
-import { ContainerCreationError, ThreadsPublisher } from './threads-publisher.js';
+import { ContainerCreationError, PublicationUncertainError, ThreadsPublisher } from './threads-publisher.js';
 import { MediaStore } from './media-store.js';
 
 export async function processPublication(queue: PublicationQueue, vault: TokenVault, publisher: ThreadsPublisher, media?: { store: MediaStore; origin: string }): Promise<boolean> {
@@ -40,10 +40,11 @@ export async function processPublication(queue: PublicationQueue, vault: TokenVa
       if (error instanceof ContainerCreationError && error.httpStatus) console.warn(JSON.stringify({ event:'threads_container_rejected', jobId:job.id, part:job.part_index + 1, operation:error.operation, retryable:error.retryable, httpStatus:error.httpStatus, metaCode:error.metaCode ?? null, metaSubcode:error.metaSubcode ?? null }));
       await queue.preparationFailed(job.id, job.lease_token, error instanceof ContainerCreationError && error.retryable, error instanceof ContainerCreationError ? error.reason : 'meta_rejected'); return true;
     }
-    if (!await queue.markPrepared(job.id, job.lease_token, container)) return true;
+    if (!await queue.markPrepared(job.id, job.lease_token, container,!payload.media_id)) return true;
+    if (!payload.media_id) return true;
   }
   if (!container) { await queue.needsAction(job.id, job.lease_token); return true; }
-  if (payload.media_id) {
+  {
     try {
       const status = await publisher.containerStatus(token,container);
       if (status === 'IN_PROGRESS') { await queue.deferPrepared(job.id,job.lease_token); return true; }
@@ -57,7 +58,11 @@ export async function processPublication(queue: PublicationQueue, vault: TokenVa
   }
   if (!await queue.beginPublish(job.id, job.lease_token)) { await queue.needsAction(job.id, job.lease_token); return true; }
   try { await queue.markPublished(job.id, job.lease_token, await publisher.publishContainer(token, container)); }
-  catch { await queue.markUncertain(job.id, job.lease_token); }
+  catch (error) {
+    const failure=error instanceof PublicationUncertainError ? {reason:error.reason,httpStatus:error.httpStatus,metaCode:error.metaCode,metaSubcode:error.metaSubcode} : {reason:'persistence' as const};
+    console.warn(JSON.stringify({event:'threads_publish_uncertain',jobId:job.id,part:job.part_index+1,reason:failure.reason,httpStatus:failure.httpStatus ?? null,metaCode:failure.metaCode ?? null,metaSubcode:failure.metaSubcode ?? null}));
+    await queue.markUncertain(job.id, job.lease_token,failure);
+  }
   return true;
 }
 
