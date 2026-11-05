@@ -132,10 +132,12 @@ export async function createApp(options: Options) {
   }, requireUser, async (req, res) => {
     res.set('Cache-Control', 'no-store'); res.set('Referrer-Policy', 'no-referrer');
     const fail = (reason: string, error?: unknown) => {
-      const details = error instanceof ThreadsOAuthError ? { httpStatus: error.httpStatus, metaCode: error.metaCode } : {};
+      const details = error instanceof ThreadsOAuthError ? { httpStatus: error.httpStatus, metaCode: error.metaCode, metaSubcode: error.metaSubcode, metaReason: error.metaReason } : {};
       console.error(JSON.stringify({ event: 'threads_oauth_failed', stage: reason, ...details }));
       const params = new URLSearchParams({ threads: 'failed', reason });
       if (details.metaCode !== undefined) params.set('meta_code', String(details.metaCode));
+      if (details.metaSubcode !== undefined) params.set('meta_subcode', String(details.metaSubcode));
+      if (details.metaReason && details.metaReason !== 'other') params.set('meta_reason', details.metaReason);
       res.redirect(303, `/#${params}`);
     };
     const user = res.locals.user as User;

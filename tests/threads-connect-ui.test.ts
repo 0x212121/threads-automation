@@ -11,7 +11,7 @@ async function waitFor(check: () => boolean) {
 for (const scenario of ['ready', 'unverified', 'missing-config', 'server-error', 'verified-elsewhere', 'missing-client-id', 'callback-failure'] as const) {
   test(`klik koneksi Threads: ${scenario}`, async () => {
     const [html, script] = await Promise.all([readFile('public/index.html', 'utf8'), readFile('public/app.js', 'utf8')]);
-    const dom = new JSDOM(html, { url: scenario === 'callback-failure' ? 'https://example.test/#threads=failed&reason=long_token&meta_code=190' : 'https://example.test', runScripts: 'outside-only', virtualConsole: new VirtualConsole() });
+    const dom = new JSDOM(html, { url: scenario === 'callback-failure' ? 'https://example.test/#threads=failed&reason=long_token&meta_code=100&meta_subcode=10&meta_reason=tester_or_review' : 'https://example.test', runScripts: 'outside-only', virtualConsole: new VirtualConsole() });
     try {
       let clicks = false;
       const calls: string[] = [];
@@ -40,7 +40,9 @@ for (const scenario of ['ready', 'unverified', 'missing-config', 'server-error',
       await waitFor(() => !get('#workspace').hidden && get('#loading').hidden);
       if (scenario === 'callback-failure') {
         assert.match(get('#threads-connect-error').textContent ?? '', /Token jangka panjang/);
-        assert.match(get('#threads-connect-error').textContent ?? '', /Kode Meta: 190/);
+        assert.match(get('#threads-connect-error').textContent ?? '', /Kode Meta: 100/);
+        assert.match(get('#threads-connect-error').textContent ?? '', /Subkode Meta: 10/);
+        assert.match(get('#threads-connect-error').textContent ?? '', /Threads Tester/);
         assert.equal(dom.window.location.hash, '');
       }
       const button = get('#connect-threads') as HTMLButtonElement;

@@ -1,7 +1,8 @@
 type Fetcher = typeof fetch;
 export type ThreadsOAuthStage = 'configuration' | 'code_exchange' | 'long_token' | 'profile';
+export type ThreadsOAuthMetaReason = 'tester_or_review' | 'permissions' | 'app_credentials' | 'token' | 'unsupported_request' | 'other';
 export class ThreadsOAuthError extends Error {
-  constructor(message: string, readonly stage: ThreadsOAuthStage = 'configuration', readonly httpStatus?: number, readonly metaCode?: number) { super(message); }
+  constructor(message: string, readonly stage: ThreadsOAuthStage = 'configuration', readonly httpStatus?: number, readonly metaCode?: number, readonly metaSubcode?: number, readonly metaReason?: ThreadsOAuthMetaReason) { super(message); }
 }
 export type ThreadsOAuthConfig = { appId: string; appSecret: string; redirectUri: string };
 
@@ -53,7 +54,15 @@ export class ThreadsOAuthClient {
       if (!response.ok) {
         const error = data && typeof data === 'object' && 'error' in data ? data.error : null;
         const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'number' && Number.isSafeInteger(error.code) ? error.code : undefined;
-        throw new ThreadsOAuthError('Permintaan ke Meta gagal.', stage, response.status, code);
+        const subcode = error && typeof error === 'object' && 'error_subcode' in error && typeof error.error_subcode === 'number' && Number.isSafeInteger(error.error_subcode) ? error.error_subcode : undefined;
+        const message = error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' ? error.message.slice(0, 4000) : '';
+        // Interpret in memory; only a fixed category leaves this method, never provider text.
+        const reason: ThreadsOAuthMetaReason = /app review|threads testers?|developer role/i.test(message) ? 'tester_or_review'
+          : /permission|scope/i.test(message) ? 'permissions'
+          : /client_secret|app secret|invalid client_id/i.test(message) ? 'app_credentials'
+          : /invalid.*token|expired.*token|token.*expired|cannot parse.*token/i.test(message) ? 'token'
+          : /unsupported request|unsupported.*method/i.test(message) ? 'unsupported_request' : 'other';
+        throw new ThreadsOAuthError('Permintaan ke Meta gagal.', stage, response.status, code, subcode, reason);
       }
       if (!data || typeof data !== 'object' || Array.isArray(data)) throw new ThreadsOAuthError('Respons Meta tidak valid.', stage);
       return data as Record<string, unknown>;

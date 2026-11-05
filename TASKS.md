@@ -40,6 +40,7 @@ Status awal: perencanaan. Kotak belum dicentang bukan klaim bahwa pekerjaan suda
 - [x] Gunakan tujuan otorisasi Threads langsung dan validasi parameter sebelum navigasi; uji bahwa `client_id` tersertakan dan URL tanpa ID diblokir. Penyebab error Meta 4476002 pada instalasi pengguna masih perlu diagnosis runtime.
 - [x] Pertahankan ID numerik besar pada pertukaran OAuth dan tampilkan diagnosis tahap callback dengan log aman. Uji sesi hilang/kedaluwarsa, penolakan, respons rusak, dan kebocoran data sensitif; uji Meta nyata masih diperlukan.
 - [x] Sesuaikan pertukaran token jangka panjang dengan parameter `access_token` pada GET sesuai contoh Meta; uji parameter dan penyamaran kegagalan transport. Konfirmasi ulang dengan akun Meta nyata masih diperlukan.
+- [x] Tampilkan subkode/kategori Meta yang aman agar penolakan tester/App Review, izin, dan kredensial dapat dibedakan tanpa membuka pesan mentah. Uji kategori dari respons simulasi dan tidak bocornya secret; status tester pengguna masih perlu dikonfirmasi.
 - [ ] Implementasikan koneksi Threads, penyimpanan token terenkripsi, status, refresh dan pemutusan.
 - [ ] Implementasikan komposer, validasi media, draft, pratinjau dan riwayat versi.
 - [ ] Implementasikan pengajuan, persetujuan/penolakan dan invalidasi persetujuan sesuai kebijakan yang disepakati.

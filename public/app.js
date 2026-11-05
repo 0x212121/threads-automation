@@ -45,14 +45,24 @@ function showWorkspace() {
       configuration: 'Konfigurasi Threads di server belum lengkap. Periksa konfigurasi dan buat ulang container.',
       access: 'Koneksi memerlukan administrator dengan email terverifikasi.',
       code_exchange: 'Pertukaran kode otorisasi ditolak atau responsnya tidak valid. Periksa Threads App ID, Threads App Secret, dan callback, lalu mulai koneksi baru.',
-      long_token: 'Token jangka panjang belum dapat diperoleh. Periksa konfigurasi Threads di server dan mulai koneksi baru.',
+      long_token: 'Token jangka panjang belum dapat diperoleh. Periksa rincian berikut dan mulai koneksi baru setelah penyebabnya diselesaikan.',
       profile: 'Identitas profil Threads belum dapat diverifikasi. Periksa akses akun dan izin threads_basic, lalu mulai koneksi baru.',
       storage: 'Akun Threads belum dapat disimpan. Periksa migrasi database, koneksi database, dan kunci enkripsi di server.'
     };
     const reason = linkParams.get('reason');
     const message = Object.hasOwn(reasons, reason) ? reasons[reason] : 'Akun Threads belum dapat dihubungkan. Mulai koneksi kembali atau periksa konfigurasi server.';
     const metaCode = linkParams.get('meta_code');
-    errorAt('#threads-connect-error', message + (metaCode && /^[0-9]{1,12}$/.test(metaCode) ? ` Kode Meta: ${metaCode}.` : ''));
+    const metaSubcode = linkParams.get('meta_subcode');
+    const metaReasons = {
+      tester_or_review: 'Meta meminta akses pengujian atau App Review. Tambahkan akun sebagai Threads Tester dan terima undangannya di Threads, atau pastikan akses App Review sesuai.',
+      permissions: 'Meta menolak izin yang diperlukan. Periksa threads_basic dan threads_content_publish pada use case Threads dan otorisasi ulang.',
+      app_credentials: 'Meta menolak kredensial aplikasi. Periksa pasangan Threads App ID dan Threads App Secret pada aplikasi yang sama.',
+      token: 'Meta menolak token sementara. Mulai koneksi baru dari aplikasi.',
+      unsupported_request: 'Meta menolak format permintaan pada endpoint ini. Periksa versi aplikasi dan diagnosis server.'
+    };
+    const metaReason = linkParams.get('meta_reason');
+    const detail = Object.hasOwn(metaReasons, metaReason) ? ` ${metaReasons[metaReason]}` : '';
+    errorAt('#threads-connect-error', message + detail + (metaCode && /^[0-9]{1,12}$/.test(metaCode) ? ` Kode Meta: ${metaCode}.` : '') + (metaSubcode && /^[0-9]{1,12}$/.test(metaSubcode) ? ` Subkode Meta: ${metaSubcode}.` : ''));
   }
   threadsResult = null;
 }

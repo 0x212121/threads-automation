@@ -72,6 +72,11 @@ test('OAuth Threads terikat pada sesi admin, sekali pakai, dan token tidak terek
     assert.equal(failed.headers.location.includes('secret-code-test'), false);
   }
   assert.equal((await db.query('SELECT id FROM threads_accounts')).rows.length, 1);
+  replies.push({ access_token: 'short-token-test', user_id: '123456' }, { error: { code: 100, error_subcode: 10, message: 'You must submit for app review, or your user must be in the list of Threads testers. test-only-secret' } });
+  const testerStart = await admin.agent.post('/api/threads/oauth/start').set('Origin', origin).set('X-CSRF-Token', admin.csrf);
+  const testerState = new URL(testerStart.body.authorizationUrl).searchParams.get('state');
+  const testerFailure = await admin.agent.get('/api/threads/oauth/callback').query({ state: testerState, code: 'secret-code-test' });
+  assert.equal(testerFailure.headers.location, '/#threads=failed&reason=long_token&meta_code=100&meta_subcode=10&meta_reason=tester_or_review');
   const logged = JSON.stringify(logs.mock.calls.map(call => call.arguments));
   assert.equal(logged.includes('secret-code-test'), false); assert.equal(logged.includes('long-token-test'), false); assert.equal(logged.includes('test-only-secret'), false);
   await db.close();

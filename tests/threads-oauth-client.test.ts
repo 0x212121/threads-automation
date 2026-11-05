@@ -57,6 +57,22 @@ test('diagnosis hanya membawa tahap dan kode Meta tanpa isi respons sensitif', a
   });
 });
 
+test('penolakan akses pengujian Meta menghasilkan kategori aman dan subkode', async () => {
+  let count = 0;
+  const fetcher = (async () => {
+    if (++count === 1) return new Response('{"access_token":"short-test","user_id":"123"}', { status: 200 });
+    return new Response(JSON.stringify({ error: { code: 100, error_subcode: 10, message: 'You must submit for app review, or your user must be in the list of Threads testers. secret-test short-test' } }), { status: 400 });
+  }) as typeof fetch;
+  const client = new ThreadsOAuthClient({ appId: '1234', appSecret: 'secret-test', redirectUri: 'https://example.test/callback' }, fetcher);
+  await assert.rejects(client.exchange('code-test'), error => {
+    assert.ok(error instanceof ThreadsOAuthError);
+    assert.equal(error.stage, 'long_token'); assert.equal(error.metaCode, 100); assert.equal(error.metaSubcode, 10); assert.equal(error.metaReason, 'tester_or_review');
+    const output = error.message + JSON.stringify(error);
+    assert.equal(output.includes('secret-test'), false); assert.equal(output.includes('short-test'), false); assert.equal(output.includes('You must submit'), false);
+    return true;
+  });
+});
+
 test('kegagalan transport token jangka panjang tidak membocorkan URL berkredensial', async () => {
   let count = 0;
   let observedToken: string | null = null;
