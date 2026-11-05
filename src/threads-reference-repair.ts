@@ -3,8 +3,8 @@ import type { Pool } from 'pg';
 import { TokenVault } from './token-vault.js';
 import { threadsPostKey } from './threads-post-url.js';
 
-type Snapshot = { post_id:string; account_id:string; content_version:number; reply_to_id:string; revision:number; encrypted_token:Buffer; token_iv:Buffer; token_tag:Buffer; threads_user_id:string; body:string; media_count:number; media_kind:string|null; first_published_at:Date|null };
-type Result={status:string;part?:number};
+type Snapshot = { post_id:string; account_id:string; content_version:number; reply_to_id:string; revision:number; encrypted_token:Buffer; token_iv:Buffer; token_tag:Buffer; threads_user_id:string; body:string; media_count:number; media_kind:string|null; first_started_at:Date|null; first_published_at:Date|null };
+type Result={status:string;part?:number;recordedStartedAt?:string;recordedPublishedAt?:string;threadsTimestamp?:string;differenceSeconds?:number;toleranceSeconds?:number};
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const id=/^[0-9]{1,30}$/;
 const normalize=(text:string)=>text.replace(/\r\n/g,'\n').trim();
@@ -16,6 +16,7 @@ export async function repairFirstReplyTarget(pool:Pool,vault:TokenVault,jobId:st
   try {
     const snapshot=await pool.query<Snapshot>(`SELECT j.post_id,j.account_id,j.content_version,j.reply_to_id,p.revision,a.encrypted_token,a.token_iv,a.token_tag,a.threads_user_id,v.body,
       (SELECT count(*)::int FROM content_version_media cm WHERE cm.post_id=v.post_id AND cm.version=v.version) AS media_count,m.kind AS media_kind,
+      (SELECT min(created_at) FROM publication_attempts WHERE job_id=j.id AND stage='prepare' AND outcome='started') AS first_started_at,
       (SELECT min(created_at) FROM publication_attempts WHERE job_id=j.id AND stage='publish' AND outcome='succeeded') AS first_published_at
       FROM publication_jobs j JOIN content_posts p ON p.id=j.post_id
       JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version
@@ -26,7 +27,7 @@ export async function repairFirstReplyTarget(pool:Pool,vault:TokenVault,jobId:st
         AND a.status='active' AND a.token_expires_at>now()
         AND EXISTS (SELECT 1 FROM content_reviews WHERE post_id=p.id AND content_version=p.current_version AND decision='approved')
         AND NOT EXISTS (SELECT 1 FROM publication_parts WHERE job_id=j.id AND position>0 AND status<>'not_published')`,[jobId]);
-    const original=snapshot.rows[0]; if (!original || !original.first_published_at || !id.test(original.reply_to_id)) return {status:'not_repairable'};
+    const original=snapshot.rows[0]; if (!original || !original.first_started_at || !original.first_published_at || !id.test(original.reply_to_id)) return {status:'not_repairable'};
     const token=vault.open({ciphertext:original.encrypted_token,iv:original.token_iv,tag:original.token_tag},`${original.account_id}:${original.threads_user_id}`);
     const get=async(url:URL)=>{
       const response=await request(url.toString(),{headers:{Authorization:`Bearer ${token}`},redirect:'error',signal:AbortSignal.timeout(10000)});
@@ -61,7 +62,11 @@ export async function repairFirstReplyTarget(pool:Pool,vault:TokenVault,jobId:st
     const expectedMedia=original.media_count>1 ? 'CAROUSEL_ALBUM' : original.media_kind ?? 'TEXT_POST';
     if (!('media_type' in post) || post.media_type!==expectedMedia) return {status:'media_type_mismatch'};
     const publishedAt='timestamp' in post && typeof post.timestamp==='string' ? Date.parse(post.timestamp) : NaN;
-    if (!Number.isFinite(publishedAt) || Math.abs(publishedAt-new Date(original.first_published_at).getTime())>5*60*1000) return {status:'publication_time_mismatch'};
+    if (!Number.isFinite(publishedAt)) return {status:'provider_timestamp_unavailable'};
+    const startedAt=new Date(original.first_started_at).getTime(), finishedAt=new Date(original.first_published_at).getTime();
+    if (!Number.isFinite(startedAt) || !Number.isFinite(finishedAt) || startedAt>finishedAt) return {status:'recorded_timestamp_unavailable'};
+    const tolerance=5*60*1000;
+    if (publishedAt<startedAt-tolerance || publishedAt>finishedAt+tolerance) return {status:'publication_time_mismatch',recordedStartedAt:new Date(startedAt).toISOString(),recordedPublishedAt:new Date(finishedAt).toISOString(),threadsTimestamp:new Date(publishedAt).toISOString(),differenceSeconds:Math.round((publishedAt-finishedAt)/1000),toleranceSeconds:300};
     if (matched.id===original.reply_to_id) return {status:'already_correct',part:2};
     const oldUrl=new URL(`https://graph.threads.net/${original.reply_to_id}`); oldUrl.searchParams.set('fields','id');
     const old=await get(oldUrl);
