@@ -61,3 +61,13 @@ docker compose exec -T app npm run check-threads-permissions
 ```
 
 Perintah ini memanggil endpoint debug resmi Meta dari server dan hanya menampilkan nama akun, validitas token, kecocokan App ID, dan empat nama izin yang dipakai aplikasi. Token, App Secret, URL, dan respons mentah tidak ditampilkan. `missing` berisi izin yang tidak diberikan; daftar kosong tidak membuktikan bahwa semua kebijakan Meta atau kondisi posting sudah terpenuhi. `debug_failed` atau respons tak dikenal berarti pemeriksaan tidak selesai dan bukan bukti izin tertentu hilang. Jika scope kurang, periksa use case pada Meta App dan hubungkan kembali akun dengan izin tersebut. Jika semua ada tetapi Meta masih menolak, periksa status tester, akses dan kebijakan akun/aplikasi di Meta; jangan menyimpulkan penyebab hanya dari kode 10.
+
+Jika penolakan berubah menjadi kode 24/subkode 4279009 saat persiapan bagian balasan, versi terbaru memeriksa akses ke target, memberi jeda 30 detik setelah publikasi bagian sebelumnya dan mencoba ulang persiapan secara terbatas. Ini tidak memastikan target hanya terlambat tersedia. Jika pekerjaan lama sudah perlu tindakan, operator dapat memilih **Lanjutkan rangkaian** setelah pembaruan, tanpa membuat draft baru.
+
+Untuk pemeriksaan pekerjaan tertentu, tambahkan ID pekerjaan dari log:
+
+```bash
+docker compose exec -T app npm run check-threads-permissions -- --job UUID-PEKERJAAN
+```
+
+Bagian `publication` memuat `parentMatchesHistory` (target sesuai catatan bagian sebelumnya), `identityMatches` (token masih untuk identitas akun tersimpan), dan `parentReadable` (target berhasil dibaca lewat Meta), beserta status HTTP/kode Meta jika ada. Hasil ini tidak menampilkan isi posting atau ID Meta, serta tidak melakukan publikasi. Jika `parentReadable` tetap false, periksa keberadaan bagian sebelumnya pada Threads dan akses akun; jangan mengganti target atau mengulang seluruh rangkaian berdasarkan dugaan. Log persiapan menyertakan `operation` agar pemeriksaan target dapat dibedakan dari pembuatan kontainer, dan `retryable` menunjukkan keputusan retry aplikasi.

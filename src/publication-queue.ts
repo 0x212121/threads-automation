@@ -105,7 +105,7 @@ export class PublicationQueue {
       const job=locked.rows[0]; if (!job) return false;
       await client.query('UPDATE publication_parts SET status=$3,published_id=$4 WHERE job_id=$1 AND position=$2',[jobId,job.part_index,status,publishedId]);
       const next = status === 'published' ? await client.query('SELECT position FROM content_version_replies WHERE post_id=$1 AND version=$2 AND position=$3',[job.post_id,job.content_version,job.part_index+1]) : null;
-      if (next?.rowCount) await client.query("UPDATE publication_jobs SET status='preparing',part_index=part_index+1,reply_to_id=$2,container_id=NULL,next_attempt_at=now(),lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1",[jobId,publishedId]);
+      if (next?.rowCount) await client.query("UPDATE publication_jobs SET status='preparing',part_index=part_index+1,reply_to_id=$2,container_id=NULL,next_attempt_at=now()+interval '30 seconds',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1",[jobId,publishedId]);
       else await client.query("UPDATE publication_jobs SET status=$2,published_id=CASE WHEN $2='published' THEN (SELECT published_id FROM publication_parts WHERE job_id=$1 AND position=0) ELSE NULL END,lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1",[jobId,status]);
       await client.query('INSERT INTO publication_attempts (id,job_id,stage,outcome) VALUES ($1,$2,\'publish\',$3)', [randomUUID(), jobId, status === 'published' ? 'succeeded' : 'uncertain']);
       return true;

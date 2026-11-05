@@ -47,3 +47,19 @@ test('media dikirim dengan URL HTTPS sesuai tipe dan status diperiksa sebelum pu
   assert.equal(urls[2]?.searchParams.get('fields'),'status');
   await assert.rejects(publisher.createMediaContainer('token-test','','IMAGE','http://example.test/file'));
 });
+
+test('target balasan diperiksa dan kode 24/4279009 hanya dapat diulang sebelum publikasi', async () => {
+  const calls:URL[]=[];
+  const unavailable=new ThreadsPublisher((async (input:string|URL|Request) => {
+    calls.push(new URL(String(input)));
+    return Response.json({error:{code:24,error_subcode:4279009,is_transient:false,message:'secret-test'}},{status:400});
+  }) as typeof fetch);
+  await assert.rejects(unavailable.checkReplyTarget('secret-test','123'),error => error instanceof ContainerCreationError && error.retryable && error.operation==='read_reply_target' && error.reason==='meta_unavailable' && !error.message.includes('secret-test'));
+  assert.equal(calls[0]?.pathname,'/123'); assert.equal(calls[0]?.searchParams.get('fields'),'id');
+  await assert.rejects(unavailable.createTextContainer('secret-test','Isi','123'),error => error instanceof ContainerCreationError && error.retryable && error.operation==='create_container');
+  await assert.rejects(unavailable.createTextContainer('secret-test','Isi'),error => error instanceof ContainerCreationError && !error.retryable);
+  await assert.rejects(unavailable.publishContainer('secret-test','123'),PublicationUncertainError);
+  assert.equal(calls.filter(url=>url.pathname==='/me/threads_publish').length,1);
+  const readable=new ThreadsPublisher((async () => Response.json({id:'123'})) as typeof fetch);
+  await readable.checkReplyTarget('secret-test','123');
+});

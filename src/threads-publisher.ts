@@ -1,5 +1,5 @@
 export class ContainerCreationError extends Error {
-  constructor(message: string, readonly retryable: boolean = false, readonly reason: 'meta_auth' | 'meta_rejected' | 'meta_unavailable' = 'meta_rejected', readonly httpStatus?: number, readonly metaCode?: number, readonly metaSubcode?: number) { super(message); }
+  constructor(message: string, readonly retryable: boolean = false, readonly reason: 'meta_auth' | 'meta_rejected' | 'meta_unavailable' = 'meta_rejected', readonly httpStatus?: number, readonly metaCode?: number, readonly metaSubcode?: number, readonly operation: 'create_container' | 'read_reply_target' = 'create_container') { super(message); }
 }
 export class PublicationUncertainError extends Error {}
 
@@ -28,24 +28,39 @@ export class ThreadsPublisher {
     if (children.length < 2 || children.length > 10 || children.some(id => !/^[0-9]+$/.test(id))) throw new ContainerCreationError('Carousel tidak valid.');
     return this.create(token,{ media_type:'CAROUSEL', children:children.join(','), ...(text.trim() ? { text } : {}) });
   }
+  async checkReplyTarget(token: string, postId: string): Promise<void> {
+    if (!token || !/^[0-9]+$/.test(postId)) throw new ContainerCreationError('Target balasan tidak valid.');
+    const url=new URL(`https://graph.threads.net/${postId}`); url.searchParams.set('fields','id');
+    try {
+      const response=await this.request(url.toString(),{headers:{Authorization:`Bearer ${token}`},redirect:'error',signal:AbortSignal.timeout(15000)});
+      if (!response.ok) throw await this.rejection(response,'read_reply_target',true);
+      const data:unknown=await response.json();
+      if (!data || typeof data!=='object' || !('id' in data) || data.id!==postId) throw new ContainerCreationError('Target balasan belum dapat diverifikasi.',true,'meta_unavailable',undefined,undefined,undefined,'read_reply_target');
+    } catch (error) { if (error instanceof ContainerCreationError) throw error; throw new ContainerCreationError('Target balasan belum dapat dibaca.',true,'meta_unavailable',undefined,undefined,undefined,'read_reply_target'); }
+  }
+  private async rejection(response: Response, operation: 'create_container' | 'read_reply_target', hasReplyTarget: boolean): Promise<ContainerCreationError> {
+    let code: number | undefined, subcode: number | undefined;
+    try {
+      const data: unknown = await response.json();
+      const error = data && typeof data === 'object' && 'error' in data ? data.error : null;
+      if (error && typeof error === 'object') {
+        if ('code' in error && typeof error.code === 'number' && Number.isSafeInteger(error.code)) code = error.code;
+        if ('error_subcode' in error && typeof error.error_subcode === 'number' && Number.isSafeInteger(error.error_subcode)) subcode = error.error_subcode;
+      }
+    } catch { /* Do not retain provider response bodies. */ }
+    // These calls cannot publish a post. A missing target can be rechecked within the job deadline.
+    const targetUnavailable=hasReplyTarget && response.status===400 && code===24 && subcode===4279009;
+    const retryable=targetUnavailable || response.status===429 || response.status>=500;
+    const reason=response.status===401 || response.status===403 ? 'meta_auth' : retryable ? 'meta_unavailable' : 'meta_rejected';
+    return new ContainerCreationError('Persiapan Threads ditolak.',retryable,reason,response.status,code,subcode,operation);
+  }
   private async create(token: string, params: Record<string,string>): Promise<string> {
     if (!token) throw new ContainerCreationError('Token tidak valid.');
     const url = new URL('https://graph.threads.net/me/threads');
     url.search = new URLSearchParams(params).toString();
     try {
       const response = await this.request(url.toString(), { method: 'POST', headers: { Authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(15000) });
-      if (!response.ok) {
-        let code: number | undefined, subcode: number | undefined;
-        try {
-          const data: unknown = await response.json();
-          const error = data && typeof data === 'object' && 'error' in data ? data.error : null;
-          if (error && typeof error === 'object') {
-            if ('code' in error && typeof error.code === 'number' && Number.isSafeInteger(error.code)) code = error.code;
-            if ('error_subcode' in error && typeof error.error_subcode === 'number' && Number.isSafeInteger(error.error_subcode)) subcode = error.error_subcode;
-          }
-        } catch { /* Do not retain provider response bodies. */ }
-        throw new ContainerCreationError('Container Threads tidak dapat dibuat.', response.status === 429 || response.status >= 500, response.status === 401 || response.status === 403 ? 'meta_auth' : response.status === 429 || response.status >= 500 ? 'meta_unavailable' : 'meta_rejected', response.status, code, subcode);
-      }
+      if (!response.ok) throw await this.rejection(response,'create_container',!!params.reply_to_id);
       const value: unknown = await response.json();
       if (!value || typeof value !== 'object' || typeof (value as { id?: unknown }).id !== 'string' || !/^[0-9]+$/.test((value as { id: string }).id)) throw new ContainerCreationError('Respons container tidak valid.');
       return (value as { id: string }).id;
