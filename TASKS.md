@@ -36,6 +36,7 @@ Status awal: perencanaan. Kotak belum dicentang bukan klaim bahwa pekerjaan suda
 - [x] Catat hak akun Threads, siapkan panduan Meta App, fondasi penyimpanan token terenkripsi, daftar akun dan pilihan akun pada draft. Koneksi akun nyata belum diuji.
 - [x] Buat klien awal pertukaran kode OAuth dan validasi profil dengan respons uji. Pengujian Meta nyata masih diperlukan.
 - [x] Tambahkan endpoint OAuth, state sekali pakai terikat sesi, konfigurasi dan tombol koneksi admin. Pengujian Meta sungguhan, pemeriksaan izin yang diberikan, refresh token dan hardening produksi masih diperlukan.
+- [x] Perbaiki tombol koneksi: periksa ulang status email/config, tampilkan proses dan pesan kegagalan, serta tautan lanjut OAuth. Uji klik kondisi siap, belum siap, gagal server, dan verifikasi dari tab lain dengan respons simulasi.
 - [ ] Implementasikan koneksi Threads, penyimpanan token terenkripsi, status, refresh dan pemutusan.
 - [ ] Implementasikan komposer, validasi media, draft, pratinjau dan riwayat versi.
 - [ ] Implementasikan pengajuan, persetujuan/penolakan dan invalidasi persetujuan sesuai kebijakan yang disepakati.

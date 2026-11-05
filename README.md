@@ -63,6 +63,8 @@ Callback yang didaftarkan di Meta harus persis `APP_ORIGIN` diikuti `/api/thread
 
 Panel **Hubungkan akun Threads** berada di halaman utama setelah masuk. Tombol dapat dipakai oleh admin dengan email terverifikasi setelah konfigurasi Threads tersedia. Panel menjelaskan jika salah satu syarat tersebut belum terpenuhi. Email diverifikasi melalui tombol **Kirim email verifikasi**, yang memerlukan SMTP yang telah dikonfigurasi.
 
+Klik tombol akan memeriksa ulang akun dan konfigurasi terbaru. Jika email baru diverifikasi melalui tab lain, klik kembali tanpa perlu keluar dan masuk. Jika belum memenuhi syarat, pesan tampil langsung di panel koneksi. Saat siap, aplikasi mengarahkan browser ke otorisasi Threads; tautan **Lanjutkan ke otorisasi Threads** tersedia jika perpindahan otomatis tidak terjadi. Pemeriksaan admin, email, CSRF, dan state OAuth tetap dilakukan di server.
+
 ## Penjadwalan dan penerbitan teks
 
 Fitur ini baru diuji dengan respons Meta simulasi, belum dengan akun Threads atau server PostgreSQL sungguhan. Worker dinonaktifkan secara default, termasuk pada `npm run local`. Setelah mengonfigurasi OAuth, SMTP, HTTPS dan migrasi, operator dapat mengaktifkannya di lingkungan pengujian dengan `PUBLISH_WORKER_ENABLED=true` dan memulai ulang aplikasi. Pastikan konfigurasi Threads lengkap; tombol penjadwalan tidak tersedia saat worker dinonaktifkan. Pengaktifan worker akan memproses pekerjaan yang jatuh tempo.

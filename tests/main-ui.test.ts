@@ -56,7 +56,7 @@ test('antarmuka utama login, menyimpan draft di server dan menyetujuinya', async
   get('#login-form').dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
   await waitFor(() => !get('#workspace').hidden && get('#loading').hidden);
   assert.equal(get('#threads-connect-panel').hidden, false);
-  assert.equal((get('#connect-threads') as HTMLButtonElement).disabled, true);
+  assert.equal((get('#connect-threads') as HTMLButtonElement).disabled, false);
   assert.match(get('#threads-config-message').textContent ?? '', /THREADS_APP_ID/);
   setConnectionState('admin', false, false);
   assert.match(get('#threads-config-message').textContent ?? '', /Verifikasi email/);

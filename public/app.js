@@ -1,6 +1,7 @@
 ﻿const $ = selector => document.querySelector(selector);
 const statusLabels = { draft: 'Draft', submitted: 'Menunggu tinjauan', approved: 'Disetujui', rejected: 'Ditolak' };
 let csrf = '', user = null, posts = [], accounts = [], accountsAvailable = true, threadsConfigured = null, publishingEnabled = false, nextOffset = null, editing = null, scheduling = null, busy = false;
+let threadsConnecting = false;
 const linkParams = new URLSearchParams(location.hash.slice(1));
 let verificationToken = linkParams.get('verify'), invitationToken = linkParams.get('invite'), resetToken = linkParams.get('reset');
 const threadsResult = linkParams.get('threads');
@@ -56,7 +57,8 @@ async function loadAccounts() {
 }
 function renderThreadsConnection() {
   const button = $('#connect-threads'), message = $('#threads-config-message');
-  button.disabled = !user || user.role !== 'admin' || !user.emailVerified || threadsConfigured !== true;
+  button.disabled = !user || user.role !== 'admin' || threadsConnecting;
+  button.textContent = threadsConnecting ? 'Menghubungkan...' : 'Hubungkan akun Threads';
   message.hidden = false;
   if (!user) message.textContent = 'Masuk untuk melihat koneksi Threads.';
   else if (user.role !== 'admin') message.textContent = 'Hanya admin yang dapat menghubungkan akun Threads.';
@@ -210,9 +212,25 @@ $('#confirm-email').addEventListener('click', async () => {
   finally { button.disabled = false; }
 });
 $('#connect-threads').addEventListener('click', async () => {
-  const button = $('#connect-threads'); button.disabled = true; errorAt('#verification-status', '');
-  try { const result = await api('/api/threads/oauth/start', { method: 'POST' }); window.location.assign(result.authorizationUrl); }
-  catch (error) { errorAt('#verification-status', error.message); button.disabled = false; }
+  if (threadsConnecting) return;
+  threadsConnecting = true; renderThreadsConnection(); errorAt('#threads-connect-error', '');
+  const link = $('#continue-threads'); link.hidden = true; link.removeAttribute('href');
+  try {
+    const current = await api('/api/auth/me'); user = current.user; showWorkspace();
+    if (user.role !== 'admin') throw new Error('Hanya admin yang dapat menghubungkan akun Threads.');
+    if (!user.emailVerified) {
+      $('#request-verification').focus();
+      throw new Error('Verifikasi email administrator terlebih dahulu melalui tombol Kirim email verifikasi, lalu klik Hubungkan akun Threads lagi.');
+    }
+    const config = await api('/api/threads/config'); threadsConfigured = config.configured === true;
+    if (!threadsConfigured) throw new Error('Konfigurasi Threads belum tersedia. Atur THREADS_APP_ID, THREADS_APP_SECRET, dan THREADS_TOKEN_KEY, lalu buat ulang container aplikasi.');
+    const result = await api('/api/threads/oauth/start', { method: 'POST' });
+    const url = new URL(result.authorizationUrl);
+    if (url.protocol !== 'https:' || url.hostname !== 'threads.net' || url.pathname !== '/oauth/authorize' || url.username || url.password || url.port) throw new Error('Alamat otorisasi Threads tidak valid.');
+    link.href = url.toString(); link.hidden = false;
+    window.location.assign(url.toString());
+  } catch (error) { errorAt('#threads-connect-error', error.message); }
+  finally { threadsConnecting = false; if (user) renderThreadsConnection(); }
 });
 $('#invite-member').addEventListener('click', () => { $('#invite-form').reset(); errorAt('#invite-error', ''); $('#invite-dialog').showModal(); $('#invite-email').focus(); });
 $('#close-invite').addEventListener('click', () => $('#invite-dialog').close());
