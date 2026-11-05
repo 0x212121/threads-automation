@@ -43,6 +43,7 @@ Status awal: perencanaan. Kotak belum dicentang bukan klaim bahwa pekerjaan suda
 ## 4. Publikasi dan notifikasi
 
 - [x] Implementasikan penjadwalan dan penerbitan teks dengan worker opt-in, lease, tenggat, backoff aman dan konfirmasi manual untuk hasil belum pasti. Uji Meta serta PostgreSQL sungguhan dan kelengkapan penanganan limit masih diperlukan.
+- [x] Tambahkan diagnosis aman untuk kegagalan persiapan dan uji simulasi dari permintaan publikasi sampai status terbit. Uji posting dengan akun Meta sungguhan masih diperlukan.
 
 - [ ] Implementasikan jadwal UTC/zona waktu, antrean persisten, klaim atomik, lease, batas satu jam dan riwayat.
 - [ ] Implementasikan publikasi sekarang/terjadwal, klasifikasi error, retry aman dan rekonsiliasi hasil belum pasti.

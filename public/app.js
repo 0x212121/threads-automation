@@ -72,6 +72,10 @@ function render() {
       let when = '';
       try { if (post.scheduled_at && post.time_zone) when = ` · ${new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: post.time_zone }).format(new Date(post.scheduled_at))} (${post.time_zone})`; } catch { when = ''; }
       extra.textContent = jobLabels[post.job_status] + when; status.after(extra);
+      if (post.job_status === 'needs_action') {
+        const reasons = { meta_auth: 'Meta menolak akses. Periksa izin dan hubungkan ulang akun Threads.', meta_rejected: 'Meta menolak konten atau permintaan. Periksa isi dan izin akun sebelum mencoba lagi.', meta_unavailable: 'Meta tidak dapat dihubungi atau membatasi permintaan. Coba kembali nanti.', preconditions: 'Persetujuan, akses pengguna, atau akun Threads tidak lagi tersedia. Periksa kembali sebelum mencoba.', token_unreadable: 'Token tidak dapat dibaca. Periksa kunci server atau hubungkan ulang akun.', deadline: 'Batas percobaan satu jam telah lewat. Periksa konten dan jadwalkan kembali.' };
+        if (reasons[post.failure_code]) extra.textContent += ` · ${reasons[post.failure_code]}`;
+      }
     }
     const actions = row.querySelector('.post-actions');
     const own = post.created_by === user.id;

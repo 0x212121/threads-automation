@@ -11,11 +11,11 @@ export async function processPublication(queue: PublicationQueue, vault: TokenVa
   if (!payload) { await queue.needsAction(job.id, job.lease_token); return true; }
   let token: string;
   try { token = vault.open({ ciphertext: payload.encrypted_token, iv: payload.token_iv, tag: payload.token_tag }, `${job.account_id}:${payload.threads_user_id}`); }
-  catch { await queue.needsAction(job.id, job.lease_token); return true; }
+  catch { await queue.needsAction(job.id, job.lease_token, 'token_unreadable'); return true; }
   let container = job.container_id;
   if (job.status === 'preparing') {
     try { container = await publisher.createTextContainer(token, payload.body); }
-    catch (error) { await queue.preparationFailed(job.id, job.lease_token, error instanceof ContainerCreationError && error.retryable); return true; }
+    catch (error) { await queue.preparationFailed(job.id, job.lease_token, error instanceof ContainerCreationError && error.retryable, error instanceof ContainerCreationError ? error.reason : 'meta_rejected'); return true; }
     if (!await queue.markPrepared(job.id, job.lease_token, container)) return true;
   }
   if (!container) { await queue.needsAction(job.id, job.lease_token); return true; }

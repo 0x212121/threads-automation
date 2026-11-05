@@ -10,7 +10,7 @@ import { TokenVault } from '../src/token-vault.js';
 
 test('worker menerbitkan satu kali dan tidak mengulang hasil yang tidak pasti', async () => {
   const db = new PGlite();
-  for (const name of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
+  for (const name of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql','011_publication_diagnostics.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
   const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.rows.length }; };
   const pool = { query, connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
   const user='11111111-1111-4111-8111-111111111111', account='22222222-2222-4222-8222-222222222222';
@@ -51,6 +51,7 @@ test('worker menerbitkan satu kali dan tidak mengulang hasil yang tidak pasti', 
   await db.query("UPDATE publication_jobs SET next_attempt_at=now() WHERE id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'");
   const permanent = new ThreadsPublisher((async () => new Response('', { status: 400 })) as typeof fetch);
   assert.equal(await processPublication(queue,vault,permanent), true);
-  assert.equal((await db.query<{ status: string }>("SELECT status FROM publication_jobs WHERE id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'")).rows[0]?.status, 'needs_action');
+  const failed = (await db.query<{ status: string; failure_code: string }>("SELECT status,failure_code FROM publication_jobs WHERE id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'")).rows[0];
+  assert.equal(failed?.status, 'needs_action'); assert.equal(failed?.failure_code, 'meta_rejected');
   await db.close();
 });

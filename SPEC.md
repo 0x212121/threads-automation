@@ -66,6 +66,8 @@ Antarmuka utama telah terhubung ke API login dan draft. Untuk pengembangan pada 
 
 Klien OAuth Threads membangun URL otorisasi, menukar kode dan memeriksa profil terhadap identitas token. Endpoint callback `/api/threads/oauth/callback` memakai state sekali pakai yang terikat sesi admin terverifikasi. Token dienkripsi menggunakan kunci terpisah yang harus disimpan persisten. Pengujian baru memakai respons simulasi; pengujian Meta nyata, verifikasi izin yang benar-benar diberikan, pembaruan otomatis token dan produksi masih diperlukan.
 
+Kegagalan sebelum pengiriman publikasi dicatat sebagai kode diagnosis terbatas yang aman ditampilkan, tanpa menyimpan pesan mentah Meta. Kegagalan setelah pengiriman tetap dianggap belum pasti dan tidak diulang otomatis. Permintaan pembuatan kontainer dan publikasi memakai parameter sebagaimana contoh koleksi resmi Meta.
+
 Retensi minimal 90 hari perlu diterjemahkan per jenis data, termasuk log, media, post, audit dan backup, dengan kebijakan penghapusan dan kapasitas 20 GB. Backup dan restore harus diuji; RPO/RTO belum ditetapkan. Monitoring minimal mencakup worker, antrean, keterlambatan, status integrasi, kegagalan notifikasi dan kapasitas. Sediakan prosedur pemulihan serta konfigurasi self-hosting yang dapat direproduksi.
 
 ## 9. Validasi sebelum implementasi dan rilis

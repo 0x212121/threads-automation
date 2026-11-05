@@ -1,0 +1,1 @@
+ALTER TABLE publication_jobs ADD COLUMN failure_code text CHECK (failure_code IS NULL OR failure_code IN ('meta_auth', 'meta_rejected', 'meta_unavailable', 'preconditions', 'token_unreadable', 'deadline'));

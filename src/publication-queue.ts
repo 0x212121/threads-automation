@@ -17,7 +17,7 @@ export class PublicationQueue {
     await this.transaction(async client => {
       const uncertain = await client.query<{ id: string }>("UPDATE publication_jobs SET status='uncertain', lease_token=NULL, lease_until=NULL, updated_at=now() WHERE status='publishing' AND lease_until <= now() RETURNING id");
       for (const row of uncertain.rows) await client.query("INSERT INTO publication_attempts (id,job_id,stage,outcome) VALUES ($1,$2,'publish','uncertain')", [randomUUID(), row.id]);
-      await client.query("UPDATE publication_jobs SET status='needs_action', lease_token=NULL, lease_until=NULL, updated_at=now() WHERE status IN ('scheduled','preparing','prepared') AND scheduled_at + interval '1 hour' <= now() AND (lease_until IS NULL OR lease_until <= now())");
+      await client.query("UPDATE publication_jobs SET status='needs_action', failure_code=COALESCE(failure_code,'deadline'), lease_token=NULL, lease_until=NULL, updated_at=now() WHERE status IN ('scheduled','preparing','prepared') AND scheduled_at + interval '1 hour' <= now() AND (lease_until IS NULL OR lease_until <= now())");
     });
   }
 
@@ -49,16 +49,16 @@ export class PublicationQueue {
     return result.rows[0] ?? null;
   }
 
-  async preparationFailed(jobId: string, lease: string, retryable: boolean): Promise<void> {
+  async preparationFailed(jobId: string, lease: string, retryable: boolean, reason: 'meta_auth' | 'meta_rejected' | 'meta_unavailable'): Promise<void> {
     await this.transaction(async client => {
       const attempts = await client.query<{ count: number }>("SELECT count(*)::int AS count FROM publication_attempts WHERE job_id=$1 AND stage='prepare' AND outcome='started'", [jobId]);
       const delay = Math.min(300, 30 * 2 ** Math.min(Math.max((attempts.rows[0]?.count ?? 1) - 1, 0), 4));
-      const updated = await client.query("UPDATE publication_jobs SET status=CASE WHEN $3::boolean AND scheduled_at+interval '1 hour'>now()+$4*interval '1 second' THEN 'scheduled' ELSE 'needs_action' END,next_attempt_at=now()+$4*interval '1 second',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2 AND status='preparing' AND lease_until>now() RETURNING id", [jobId, lease, retryable, delay]);
+      const updated = await client.query("UPDATE publication_jobs SET status=CASE WHEN $3::boolean AND scheduled_at+interval '1 hour'>now()+$4*interval '1 second' THEN 'scheduled' ELSE 'needs_action' END,failure_code=$5,next_attempt_at=now()+$4*interval '1 second',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2 AND status='preparing' AND lease_until>now() RETURNING id", [jobId, lease, retryable, delay, reason]);
       if (updated.rowCount) await client.query("INSERT INTO publication_attempts (id,job_id,stage,outcome) VALUES ($1,$2,'prepare','safe_failure')", [randomUUID(), jobId]);
     });
   }
-  async needsAction(jobId: string, lease: string): Promise<void> {
-    await this.pool.query("UPDATE publication_jobs SET status='needs_action',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2 AND status IN ('preparing','prepared') AND lease_until>now()", [jobId, lease]);
+  async needsAction(jobId: string, lease: string, reason: 'preconditions' | 'token_unreadable' = 'preconditions'): Promise<void> {
+    await this.pool.query("UPDATE publication_jobs SET status='needs_action',failure_code=$3,lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2 AND status IN ('preparing','prepared') AND lease_until>now()", [jobId, lease, reason]);
   }
 
   async beginPublish(jobId: string, lease: string): Promise<boolean> {

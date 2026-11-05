@@ -8,8 +8,10 @@ test('container teks dibuat tanpa publikasi otomatis dan dipublikasikan terpisah
   const publisher = new ThreadsPublisher(fetcher);
   assert.equal(await publisher.createTextContainer('secret-test', 'Isi konten'), '123');
   assert.equal(await publisher.publishContainer('secret-test', '123'), '456');
-  assert.equal((calls[0]?.init?.body as URLSearchParams).has('auto_publish_text'), false);
-  assert.equal((calls[1]?.init?.body as URLSearchParams).get('creation_id'), '123');
+  assert.equal(new URL(calls[0]!.url).searchParams.has('auto_publish_text'), false);
+  assert.equal(new URL(calls[0]!.url).searchParams.get('text'), 'Isi konten');
+  assert.equal(new URL(calls[0]!.url).searchParams.get('media_type'), 'TEXT');
+  assert.equal(new URL(calls[1]!.url).searchParams.get('creation_id'), '123');
   assert.equal(calls[0]?.url.includes('secret-test'), false);
   assert.equal(calls[1]?.url.includes('secret-test'), false);
 });
@@ -23,4 +25,6 @@ test('timeout atau respons gagal setelah publikasi selalu ditandai tidak pasti',
   await assert.rejects(badReply.publishContainer('secret-test', '123'), PublicationUncertainError);
   const rejected = new ThreadsPublisher((async () => new Response('{}', { status: 400 })) as typeof fetch);
   await assert.rejects(rejected.createTextContainer('secret-test', 'Isi'), error => error instanceof ContainerCreationError && !error.retryable);
+  const forbidden = new ThreadsPublisher((async () => new Response('{"error":{"message":"secret-test"}}', { status: 403 })) as typeof fetch);
+  await assert.rejects(forbidden.createTextContainer('secret-test', 'Isi'), error => error instanceof ContainerCreationError && error.reason === 'meta_auth' && !error.message.includes('secret-test'));
 });

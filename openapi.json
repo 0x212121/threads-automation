@@ -1554,6 +1554,11 @@
                   "string",
                   "null"
                 ]
+              },
+              "failure_code": {
+                "type": ["string", "null"],
+                "enum": ["meta_auth", "meta_rejected", "meta_unavailable", "preconditions", "token_unreadable", "deadline", null],
+                "description": "Kode diagnosis aman; tidak memuat respons mentah Meta atau token."
               }
             }
           }

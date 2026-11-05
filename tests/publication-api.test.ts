@@ -9,10 +9,13 @@ import { createApp } from '../src/app.js';
 import { hashPassword } from '../src/password.js';
 import { TokenVault } from '../src/token-vault.js';
 import { ThreadsAccounts } from '../src/threads-accounts.js';
+import { PublicationQueue } from '../src/publication-queue.js';
+import { processPublication } from '../src/publication-worker.js';
+import { ThreadsPublisher } from '../src/threads-publisher.js';
 
 test('API menjadwalkan draft yang disetujui, memeriksa CSRF dan membatalkan sebelum diklaim', async () => {
   const db = new PGlite();
-  for (const name of ['001_content.sql','002_local_identity.sql','006_password_reset.sql','007_threads_accounts.sql','009_publication_jobs.sql','010_publication_resolutions.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
+  for (const name of ['001_content.sql','002_local_identity.sql','006_password_reset.sql','007_threads_accounts.sql','009_publication_jobs.sql','011_publication_diagnostics.sql','010_publication_resolutions.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
   const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.rows.length }; };
   const pool = { query, connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
   const user='11111111-1111-4111-8111-111111111111', hash = await hashPassword('kata sandi untuk pengujian');
@@ -38,5 +41,15 @@ test('API menjadwalkan draft yang disetujui, memeriksa CSRF dan membatalkan sebe
   assert.equal((await agent.post(`/api/posts/${post}/schedules/${job}/reschedule`).set('Origin',origin).set('X-CSRF-Token',csrf).send({revision:3,localTime:laterAgain,timeZone:'UTC'})).status,200);
   assert.equal((await agent.post(`/api/posts/${post}/schedules/${job}/cancel`).set('Origin',origin).set('X-CSRF-Token',csrf).send({revision:3})).status,200);
   assert.equal((await agent.put(`/api/posts/${post}`).set('Origin',origin).set('X-CSRF-Token',csrf).send({body:'Perubahan',revision:3})).status,200);
+  const created2=await agent.post('/api/posts').set('Origin',origin).set('X-CSRF-Token',csrf).send({body:'Publikasi end-to-end',destinationAccountId:account});
+  const post2=created2.body.post.id;
+  await agent.post(`/api/posts/${post2}/submit`).set('Origin',origin).set('X-CSRF-Token',csrf).send({revision:1});
+  await agent.post(`/api/posts/${post2}/approve`).set('Origin',origin).set('X-CSRF-Token',csrf).send({revision:2});
+  assert.equal((await agent.post(`/api/posts/${post2}/publish-now`).set('Origin',origin).set('X-CSRF-Token',csrf).send({revision:3,timeZone:'UTC'})).status,201);
+  let calls=0;
+  const publisher=new ThreadsPublisher((async () => new Response(JSON.stringify({id:++calls===1?'12345':'67890'}),{status:200})) as typeof fetch);
+  assert.equal(await processPublication(new PublicationQueue(pool),new TokenVault(Buffer.alloc(32,7)),publisher),true);
+  const published=(await agent.get('/api/posts')).body.posts.find((row: { id: string }) => row.id===post2);
+  assert.equal(published.job_status,'published'); assert.equal(published.published_id,'67890'); assert.equal(calls,2);
   await db.close();
 });

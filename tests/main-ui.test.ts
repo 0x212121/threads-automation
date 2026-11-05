@@ -16,7 +16,7 @@ async function waitFor(predicate: () => boolean) {
 
 test('antarmuka utama login, menyimpan draft di server dan menyetujuinya', async () => {
   const db = new PGlite();
-  for (const migration of ['001_content.sql', '002_local_identity.sql', '006_password_reset.sql', '007_threads_accounts.sql', '009_publication_jobs.sql', '010_publication_resolutions.sql']) await db.exec(await readFile(`db/migrations/${migration}`, 'utf8'));
+  for (const migration of ['001_content.sql', '002_local_identity.sql', '006_password_reset.sql', '007_threads_accounts.sql', '009_publication_jobs.sql','011_publication_diagnostics.sql', '010_publication_resolutions.sql']) await db.exec(await readFile(`db/migrations/${migration}`, 'utf8'));
   const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.rows.length }; };
   const pool = { query, connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
   await bootstrapAdmin(pool, 'kata sandi untuk pengujian');
@@ -74,6 +74,9 @@ test('antarmuka utama login, menyimpan draft di server dan menyetujuinya', async
   await waitFor(() => win.document.querySelector('.post-row .field-help')?.textContent?.includes('Terjadwal') === true);
   clickAction('Batalkan jadwal');
   await waitFor(() => win.document.querySelector('.post-row .field-help')?.textContent?.includes('dibatalkan') === true);
+  await db.query("UPDATE publication_jobs SET status='needs_action',failure_code='meta_auth'");
+  await win.eval('loadPosts()');
+  assert.match(win.document.querySelector('.post-row .field-help')?.textContent ?? '', /Meta menolak akses/);
   await db.exec(await readFile('db/migrations/005_invitations.sql', 'utf8'));
   get('#invite-member').click();
   (get('#invite-email') as HTMLInputElement).value = 'tim@example.test';
