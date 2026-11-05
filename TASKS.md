@@ -53,6 +53,7 @@ Status awal: perencanaan. Kotak belum dicentang bukan klaim bahwa pekerjaan suda
 - [x] Pengguna membuktikan target tersimpan berbeda dari ID berdasarkan permalink yang dapat dibaca, dengan izin lengkap. Tambahkan pemulihan referensi pertama yang terverifikasi dan diaudit; uji verifikasi, perubahan bersamaan, penolakan hasil belum pasti serta kelanjutan tanpa duplikasi. Pemulihan pada server pengguna dan asal perbedaan ID historis masih perlu dikonfirmasi.
 - [x] Perbaiki rentang waktu verifikasi pemulihan agar mencakup seluruh persiapan pertama, serta tampilkan timestamp UTC dan selisih saat tidak cocok. Uji persiapan panjang dan penolakan di luar rentang; konfirmasi hasil server pengguna masih diperlukan.
 - [x] Sesuai pilihan pengguna, tambahkan pencarian read-only untuk posting asli di sekitar waktu pekerjaan, dengan tautan dan penanda kecocokan tanpa isi/token. Uji penyaringan waktu, pagination, penyamaran kegagalan dan tidak adanya perubahan data; hasil pencarian server pengguna masih diperlukan.
+- [x] Uji rangkaian delapan bagian dengan ID kontainer dan publikasi berbeda yang melebihi batas integer aman JavaScript, target tertunda dan restart worker setiap tahap. Simulasi berhasil sampai delapan bagian; penolakan Meta terbaru di server pengguna masih memerlukan kode/subkode aktual.
 - [ ] Lengkapi validasi media/teks terhadap semua batas Meta, tampilan riwayat versi, retensi dan pembersihan berkas yatim.
 - [ ] Validasi kebijakan persetujuan dan pembatalannya terhadap seluruh alur UI, API dan kondisi bersamaan.
 
