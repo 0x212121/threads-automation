@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+import type { Pool } from 'pg';
+import { PublicationQueue } from '../src/publication-queue.js';
+import { ContentStore } from '../src/content-store.js';
+
+test('job dicatat sebelum publikasi dan proses terhenti menghasilkan status tidak pasti', async () => {
+  const db = new PGlite();
+  for (const name of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
+  const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.affectedRows ?? result.rows.length }; };
+  const pool = { connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
+  const user='11111111-1111-4111-8111-111111111111', account='22222222-2222-4222-8222-222222222222', post='33333333-3333-4333-8333-333333333333', job='44444444-4444-4444-8444-444444444444';
+  await db.query("INSERT INTO local_users (id,email,password_hash,role,email_verified_at) VALUES ($1,'admin@example.test','hash','admin',now())", [user]);
+  await db.query("INSERT INTO threads_accounts (id,threads_user_id,username,connected_by,encrypted_token,token_iv,token_tag,token_expires_at,status) VALUES ($1,'123','akun',$2,'x','x','x',now()+interval '1 day','active')", [account,user]);
+  await db.exec('BEGIN');
+  await db.query("INSERT INTO content_posts(id,created_by,status,current_version) VALUES ($1,$2,'approved',1)", [post,user]);
+  await db.query("INSERT INTO content_versions(post_id,version,body,destination_account_id,created_by) VALUES ($1,1,'teks',$2,$3)", [post,account,user]);
+  await db.exec('COMMIT');
+  await db.query("INSERT INTO content_reviews(id,post_id,content_version,reviewer_id,decision) VALUES ('55555555-5555-4555-8555-555555555555',$1,1,$2,'approved')", [post,user]);
+  await db.query("INSERT INTO publication_jobs(id,post_id,content_version,account_id,requested_by,scheduled_at,time_zone,next_attempt_at,status) VALUES ($1,$2,1,$3,$4,now()-interval '1 minute','Asia/Makassar',now(),'scheduled')", [job,post,account,user]);
+  await assert.rejects(new ContentStore(pool).edit({ id: user, role: 'admin' }, post, 1, { body: 'Ubah', destinationAccountId: account }), /publikasi aktif/);
+  const queue = new PublicationQueue(pool);
+  const claimed = await queue.claim(); assert.ok(claimed); assert.equal(claimed.status, 'preparing');
+  assert.equal(await queue.claim(), null);
+  assert.equal(await queue.markPrepared(job, claimed.lease_token, '12345'), true);
+  assert.equal(await queue.beginPublish(job, claimed.lease_token), true);
+  await db.query("UPDATE publication_jobs SET lease_until=now()-interval '1 second' WHERE id=$1", [job]);
+  await queue.recover();
+  assert.equal((await db.query<{ status: string }>('SELECT status FROM publication_jobs WHERE id=$1',[job])).rows[0]?.status, 'uncertain');
+  assert.equal(await queue.claim(), null);
+  assert.equal(await queue.markPublished(job, claimed.lease_token, '999'), false);
+  const events = await db.query<{ outcome: string }>('SELECT outcome FROM publication_attempts WHERE job_id=$1 ORDER BY created_at,id', [job]);
+  assert.ok(events.rows.some(event => event.outcome === 'uncertain'));
+  await db.close();
+});

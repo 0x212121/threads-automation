@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: threads
+      POSTGRES_USER: threads
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your environment}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U threads -d threads"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+  app:
+    build: .
+    environment:
+      PGHOST: db
+      PGDATABASE: threads
+      PGUSER: threads
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your environment}
+      PORT: 3000
+      APP_ORIGIN: ${APP_ORIGIN:?Set APP_ORIGIN to your HTTPS origin}
+      SESSION_SECRET: ${SESSION_SECRET:?Set a random session secret of at least 32 bytes}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      THREADS_APP_ID: ${THREADS_APP_ID:-}
+      THREADS_APP_SECRET: ${THREADS_APP_SECRET:-}
+      THREADS_TOKEN_KEY: ${THREADS_TOKEN_KEY:-}
+      PUBLISH_WORKER_ENABLED: ${PUBLISH_WORKER_ENABLED:-false}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  database:

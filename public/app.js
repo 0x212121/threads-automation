@@ -1,0 +1,269 @@
+﻿const $ = selector => document.querySelector(selector);
+const statusLabels = { draft: 'Draft', submitted: 'Menunggu tinjauan', approved: 'Disetujui', rejected: 'Ditolak' };
+let csrf = '', user = null, posts = [], accounts = [], accountsAvailable = true, publishingEnabled = false, nextOffset = null, editing = null, scheduling = null, busy = false;
+const linkParams = new URLSearchParams(location.hash.slice(1));
+let verificationToken = linkParams.get('verify'), invitationToken = linkParams.get('invite'), resetToken = linkParams.get('reset');
+const threadsResult = linkParams.get('threads');
+if (verificationToken || invitationToken || resetToken || threadsResult) history.replaceState(null, '', location.pathname + location.search);
+
+async function api(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (options.method && options.method !== 'GET') { headers['Content-Type'] = 'application/json'; headers['X-CSRF-Token'] = csrf; }
+  const response = await fetch(path, { ...options, credentials: 'same-origin', headers });
+  let data = {};
+  if (response.status !== 204) { try { data = await response.json(); } catch { /* The generic error is shown below. */ } }
+  if (!response.ok) {
+    if (response.status === 401 && path !== '/api/auth/login') { user = null; csrf = ''; showLogin(); }
+    const failure = new Error(data.error || 'Permintaan gagal. Coba lagi.'); failure.status = response.status; throw failure;
+  }
+  return data;
+}
+function errorAt(id, message) { const element = $(id); element.textContent = message; element.hidden = !message; }
+function setBusy(value) {
+  busy = value;
+  $('#save-post').disabled = value;
+  document.querySelectorAll('.action').forEach(button => { button.disabled = value; });
+}
+function showLogin() { if ($('#editor').open) $('#editor').close(); if ($('#invite-dialog').open) $('#invite-dialog').close(); if ($('#schedule-dialog').open) $('#schedule-dialog').close(); $('#initial-loading').hidden = true; $('#workspace').hidden = true; $('#login-screen').hidden = false; $('#password').value = ''; $('#login-form').hidden = !!invitationToken || !!resetToken; $('#accept-invitation-form').hidden = !invitationToken; $('#reset-request-form').hidden = true; $('#reset-confirm-form').hidden = !resetToken; }
+function showWorkspace() {
+  $('#initial-loading').hidden = true; $('#login-screen').hidden = true; $('#workspace').hidden = false;
+  $('#sidebar-email').textContent = user.email;
+  $('#sidebar-role').textContent = ({ admin: 'Admin', editor: 'Editor', reviewer: 'Reviewer' })[user.role] || user.role;
+  $('#verified-notice').hidden = user.emailVerified;
+  $('#confirm-verification').hidden = !verificationToken || user.emailVerified;
+  $('#invite-team').hidden = user.role !== 'admin' || !user.emailVerified;
+  $('#threads-connect-panel').hidden = user.role !== 'admin' || !user.emailVerified;
+  $('#invitation-pending').hidden = !invitationToken;
+  $('#reset-pending').hidden = !resetToken;
+  if (threadsResult === 'connected') errorAt('#verification-status', 'Akun Threads berhasil dihubungkan.');
+  if (threadsResult === 'failed') errorAt('#verification-status', 'Akun Threads belum dapat dihubungkan. Periksa konfigurasi atau coba lagi.');
+}
+async function loadPosts(append = false) {
+  $('#loading').hidden = false; errorAt('#workspace-error', '');
+  try {
+    const result = await api(`/api/posts?offset=${append ? nextOffset : 0}`);
+    posts = append ? [...posts, ...result.posts] : result.posts;
+    nextOffset = result.nextOffset;
+    render();
+  } catch (error) { errorAt('#workspace-error', error.message); }
+  finally { $('#loading').hidden = true; }
+}
+async function loadAccounts() {
+  try { const result = await api('/api/threads/accounts'); accounts = result.accounts; accountsAvailable = true; const config = await api('/api/threads/config'); publishingEnabled = config.publishingEnabled === true; $('#connect-threads').hidden = !config.configured; $('#threads-config-message').hidden = config.configured; }
+  catch (error) { if (error.status === 401) throw error; accounts = []; accountsAvailable = false; }
+}
+function render() {
+  const filter = $('#filter').value;
+  const visible = filter === 'all' ? posts : posts.filter(post => post.status === filter);
+  $('#empty').hidden = visible.length > 0;
+  $('#empty-create').hidden = posts.length > 0;
+  $('#list-wrap').hidden = visible.length === 0;
+  $('#load-more').hidden = nextOffset === null;
+  const list = $('#post-list'); list.replaceChildren();
+  for (const post of visible) {
+    const row = $('#post-template').content.firstElementChild.cloneNode(true);
+    row.querySelector('.post-text').textContent = post.body;
+    const created = new Date(post.created_at);
+    row.querySelector('.post-created').textContent = `${Number.isNaN(created.getTime()) ? '' : `Dibuat ${new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(created)}`}${post.destination_username ? ` · @${post.destination_username}` : ''}`;
+    const status = row.querySelector('.status'); status.textContent = statusLabels[post.status] || post.status; status.classList.add(post.status);
+    const jobLabels = { scheduled: 'Terjadwal', preparing: 'Menyiapkan publikasi', prepared: 'Menyiapkan publikasi', publishing: 'Sedang menerbitkan', published: 'Terbit', confirmed_published: 'Terbit, dikonfirmasi anggota', uncertain: 'Hasil belum pasti, periksa Threads sebelum menentukan hasil', needs_action: 'Perlu tindakan', cancelled: 'Jadwal dibatalkan' };
+    if (post.job_status && jobLabels[post.job_status]) {
+      const extra = document.createElement('div'); extra.className = 'field-help';
+      let when = '';
+      try { if (post.scheduled_at && post.time_zone) when = ` · ${new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: post.time_zone }).format(new Date(post.scheduled_at))} (${post.time_zone})`; } catch { when = ''; }
+      extra.textContent = jobLabels[post.job_status] + when; status.after(extra);
+    }
+    const actions = row.querySelector('.post-actions');
+    const own = post.created_by === user.id;
+    const blocked = ['scheduled', 'preparing', 'prepared', 'publishing', 'published', 'confirmed_published', 'uncertain'].includes(post.job_status);
+    const mayManage = own || user.role === 'admin' || user.role === 'reviewer';
+    const mayPublish = user.emailVerified && mayManage;
+    if (own && post.status !== 'submitted' && !blocked) addAction(actions, 'Ubah', () => openEditor(post));
+    if (own && (post.status === 'draft' || post.status === 'rejected') && !blocked) addAction(actions, 'Ajukan', () => transition(post, 'submit'));
+    if (post.status === 'submitted' && (user.role === 'admin' || user.role === 'reviewer')) {
+      addAction(actions, 'Setujui', () => transition(post, 'approve'));
+      addAction(actions, 'Tolak', () => transition(post, 'reject'));
+    }
+    if (post.status === 'approved' && mayPublish && post.destination_account_id && !blocked && publishingEnabled) {
+      addAction(actions, 'Jadwalkan', () => openSchedule(post));
+      addAction(actions, 'Terbitkan sekarang', () => publishNow(post));
+    }
+    if (post.job_status === 'scheduled' && mayManage) {
+      if (publishingEnabled && mayPublish) addAction(actions, 'Ubah jadwal', () => openSchedule(post));
+      addAction(actions, 'Batalkan jadwal', () => cancelSchedule(post));
+    }
+    if (post.job_status === 'uncertain' && mayManage) {
+      addAction(actions, 'Sudah terbit', () => resolvePublication(post, 'published'));
+      addAction(actions, 'Tidak terbit', () => resolvePublication(post, 'not_published'));
+    }
+    list.append(row);
+  }
+}
+function addAction(container, label, fn) {
+  const button = document.createElement('button'); button.type = 'button'; button.className = 'action'; button.textContent = label; button.disabled = busy;
+  button.addEventListener('click', fn); container.append(button);
+}
+async function transition(post, action) {
+  if (busy) return;
+  setBusy(true); errorAt('#workspace-error', '');
+  try { await api(`/api/posts/${encodeURIComponent(post.id)}/${action}`, { method: 'POST', body: JSON.stringify({ revision: post.revision }) }); await loadPosts(); }
+  catch (error) { errorAt('#workspace-error', error.message); }
+  finally { setBusy(false); }
+}
+function openEditor(post = null) {
+  editing = post; $('#post-text').value = post?.body || ''; $('#editor-title').textContent = post ? 'Ubah draft' : 'Buat draft';
+  const select = $('#post-account'); select.replaceChildren();
+  const blank = document.createElement('option'); blank.value = ''; blank.textContent = 'Belum dipilih'; select.append(blank);
+  for (const account of accounts) { const option = document.createElement('option'); option.value = account.id; option.textContent = `@${account.username}`; select.append(option); }
+  if (post?.destination_account_id && !accounts.some(account => account.id === post.destination_account_id)) { const option = document.createElement('option'); option.value = post.destination_account_id; option.textContent = `@${post.destination_username || 'akun'} (tidak tersedia)`; select.append(option); }
+  select.value = post?.destination_account_id || '';
+  select.disabled = !accountsAvailable;
+  $('#account-help').textContent = !accountsAvailable ? 'Daftar akun tidak dapat dimuat. Akun tujuan draft yang ada akan dipertahankan.' : accounts.length ? 'Pilih akun tujuan yang terhubung atau biarkan kosong.' : 'Belum ada akun Threads yang terhubung.';
+  errorAt('#form-error', ''); $('#editor').showModal(); $('#post-text').focus();
+}
+function openSchedule(post) {
+  scheduling = post; $('#schedule-form').reset();
+  $('#schedule-title').textContent = post.job_status === 'scheduled' ? 'Ubah jadwal' : 'Jadwalkan posting';
+  $('#schedule-zone').value = post.time_zone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  errorAt('#schedule-error', ''); $('#schedule-dialog').showModal(); $('#schedule-time').focus();
+}
+async function publishNow(post) {
+  if (busy || !confirm('Terbitkan konten ini ke akun Threads yang dipilih sekarang?')) return;
+  setBusy(true); errorAt('#workspace-error', '');
+  try { await api(`/api/posts/${encodeURIComponent(post.id)}/publish-now`, { method: 'POST', body: JSON.stringify({ revision: post.revision, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }) }); await loadPosts(); }
+  catch (error) { errorAt('#workspace-error', error.message); }
+  finally { setBusy(false); }
+}
+async function cancelSchedule(post) {
+  if (busy || !confirm('Batalkan jadwal posting ini?')) return;
+  setBusy(true); errorAt('#workspace-error', '');
+  try { await api(`/api/posts/${encodeURIComponent(post.id)}/schedules/${encodeURIComponent(post.job_id)}/cancel`, { method: 'POST', body: JSON.stringify({ revision: post.revision }) }); await loadPosts(); }
+  catch (error) { errorAt('#workspace-error', error.message); }
+  finally { setBusy(false); }
+}
+async function resolvePublication(post, decision) {
+  const prompt = decision === 'published' ? 'Apakah kamu sudah memeriksa akun Threads dan memastikan posting ini sudah terbit?' : 'Apakah kamu sudah memeriksa akun Threads dan memastikan posting ini tidak terbit? Jika keliru, percobaan berikutnya dapat membuat posting ganda.';
+  if (busy || !confirm(prompt)) return;
+  setBusy(true); errorAt('#workspace-error', '');
+  try { await api(`/api/posts/${encodeURIComponent(post.id)}/schedules/${encodeURIComponent(post.job_id)}/resolve`, { method: 'POST', body: JSON.stringify({ revision: post.revision, decision, acknowledged: true }) }); await loadPosts(); }
+  catch (error) { errorAt('#workspace-error', error.message); }
+  finally { setBusy(false); }
+}
+$('#schedule-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (busy || !scheduling) return;
+  setBusy(true); $('#save-schedule').disabled = true; errorAt('#schedule-error', '');
+  try {
+    const path = scheduling.job_status === 'scheduled' ? `/api/posts/${encodeURIComponent(scheduling.id)}/schedules/${encodeURIComponent(scheduling.job_id)}/reschedule` : `/api/posts/${encodeURIComponent(scheduling.id)}/schedule`;
+    await api(path, { method: 'POST', body: JSON.stringify({ revision: scheduling.revision, localTime: $('#schedule-time').value, timeZone: $('#schedule-zone').value.trim() }) });
+    $('#schedule-dialog').close(); await loadPosts();
+  } catch (error) { errorAt('#schedule-error', error.message); }
+  finally { setBusy(false); $('#save-schedule').disabled = false; }
+});
+$('#close-schedule').addEventListener('click', () => $('#schedule-dialog').close());
+$('#cancel-schedule-dialog').addEventListener('click', () => $('#schedule-dialog').close());
+$('#login-form').addEventListener('submit', async event => {
+  event.preventDefault(); const button = $('#login-form button[type="submit"]'); button.disabled = true; errorAt('#login-error', '');
+  try {
+    if (!csrf) csrf = (await api('/api/auth/csrf')).csrfToken;
+    const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: $('#email').value, password: $('#password').value }) });
+    csrf = result.csrfToken; user = result.user; $('#password').value = ''; showWorkspace(); await loadAccounts(); await loadPosts();
+  } catch (error) { errorAt('#login-error', error.message); }
+  finally { button.disabled = false; }
+});
+$('#logout').addEventListener('click', async () => {
+  const button = $('#logout'); button.disabled = true;
+  try { await api('/api/auth/logout', { method: 'POST' }); csrf = ''; posts = []; user = null; showLogin(); }
+  catch (error) { errorAt('#workspace-error', error.message); }
+  finally { button.disabled = false; }
+});
+$('#request-verification').addEventListener('click', async () => {
+  const button = $('#request-verification'); button.disabled = true; errorAt('#verification-status', '');
+  try { await api('/api/auth/verification/request', { method: 'POST' }); errorAt('#verification-status', 'Jika email belum diverifikasi, periksa kotak masuk untuk tautan verifikasi.'); }
+  catch (error) { errorAt('#verification-status', error.message); }
+  finally { button.disabled = false; }
+});
+$('#confirm-email').addEventListener('click', async () => {
+  const button = $('#confirm-email'); button.disabled = true; errorAt('#verification-status', '');
+  try {
+    await api('/api/auth/verification/confirm', { method: 'POST', body: JSON.stringify({ token: verificationToken }) });
+    verificationToken = null; user.emailVerified = true; $('#confirm-verification').hidden = true; $('#verified-notice').hidden = true; $('#invite-team').hidden = user.role !== 'admin'; $('#threads-connect-panel').hidden = user.role !== 'admin';
+    errorAt('#verification-status', 'Email berhasil diverifikasi.');
+  } catch (error) { errorAt('#verification-status', error.message); }
+  finally { button.disabled = false; }
+});
+$('#connect-threads').addEventListener('click', async () => {
+  const button = $('#connect-threads'); button.disabled = true; errorAt('#verification-status', '');
+  try { const result = await api('/api/threads/oauth/start', { method: 'POST' }); window.location.assign(result.authorizationUrl); }
+  catch (error) { errorAt('#verification-status', error.message); button.disabled = false; }
+});
+$('#invite-member').addEventListener('click', () => { $('#invite-form').reset(); errorAt('#invite-error', ''); $('#invite-dialog').showModal(); $('#invite-email').focus(); });
+$('#close-invite').addEventListener('click', () => $('#invite-dialog').close());
+$('#cancel-invite-dialog').addEventListener('click', () => $('#invite-dialog').close());
+$('#invite-form').addEventListener('submit', async event => {
+  event.preventDefault(); const button = $('#send-invitation'); button.disabled = true; errorAt('#invite-error', '');
+  try {
+    await api('/api/invitations', { method: 'POST', body: JSON.stringify({ email: $('#invite-email').value, role: $('#invite-role').value }) });
+    $('#invite-dialog').close(); errorAt('#verification-status', 'Undangan berhasil dikirim.');
+  } catch (error) { errorAt('#invite-error', error.message); }
+  finally { button.disabled = false; }
+});
+$('#cancel-invite').addEventListener('click', () => { invitationToken = null; $('#accept-invitation-form').reset(); showLogin(); });
+$('#forgot-password').addEventListener('click', () => { $('#login-form').hidden = true; $('#reset-request-form').hidden = false; errorAt('#login-message', ''); $('#reset-email').focus(); });
+$('#cancel-reset-request').addEventListener('click', () => { $('#reset-request-form').reset(); showLogin(); });
+$('#cancel-reset-confirm').addEventListener('click', () => { resetToken = null; $('#reset-confirm-form').reset(); showLogin(); });
+$('#reset-request-form').addEventListener('submit', async event => {
+  event.preventDefault(); const button = $('#reset-request-form button[type="submit"]'); button.disabled = true; errorAt('#reset-request-error', '');
+  try {
+    if (!csrf) csrf = (await api('/api/auth/csrf')).csrfToken;
+    await api('/api/auth/password-reset/request', { method: 'POST', body: JSON.stringify({ email: $('#reset-email').value }) });
+    $('#reset-request-form').reset(); showLogin(); errorAt('#login-message', 'Jika akun tersedia, tautan pemulihan akan dikirim ke email tersebut.');
+  } catch (error) { errorAt('#reset-request-error', error.message); }
+  finally { button.disabled = false; }
+});
+$('#reset-confirm-form').addEventListener('submit', async event => {
+  event.preventDefault(); const button = $('#reset-confirm-form button[type="submit"]'); button.disabled = true; errorAt('#reset-confirm-error', '');
+  try {
+    if ($('#reset-password').value !== $('#reset-password-confirm').value) throw new Error('Kata sandi tidak cocok.');
+    if (!csrf) csrf = (await api('/api/auth/csrf')).csrfToken;
+    await api('/api/auth/password-reset/confirm', { method: 'POST', body: JSON.stringify({ token: resetToken, password: $('#reset-password').value }) });
+    csrf = ''; resetToken = null; $('#reset-confirm-form').reset(); showLogin(); errorAt('#login-message', 'Kata sandi diperbarui. Silakan masuk kembali.');
+  } catch (error) { errorAt('#reset-confirm-error', error.message); }
+  finally { button.disabled = false; }
+});
+$('#accept-invitation-form').addEventListener('submit', async event => {
+  event.preventDefault(); const button = $('#accept-invitation-form button[type="submit"]'); button.disabled = true; errorAt('#accept-error', '');
+  try {
+    if ($('#invite-password').value !== $('#invite-password-confirm').value) throw new Error('Kata sandi tidak cocok.');
+    if (!csrf) csrf = (await api('/api/auth/csrf')).csrfToken;
+    await api('/api/invitations/accept', { method: 'POST', body: JSON.stringify({ token: invitationToken, password: $('#invite-password').value }) });
+    invitationToken = null; $('#accept-invitation-form').reset(); showLogin(); errorAt('#login-message', 'Undangan diterima. Masuk menggunakan email yang menerima undangan dan kata sandi baru.');
+  } catch (error) { errorAt('#accept-error', error.message); }
+  finally { button.disabled = false; }
+});
+$('#post-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (busy) return;
+  const body = $('#post-text').value.trim();
+  if (!body) { errorAt('#form-error', 'Isi draft tidak boleh kosong.'); return; }
+  setBusy(true); errorAt('#form-error', '');
+  try {
+    const payload = editing ? { body, revision: editing.revision } : { body };
+    if (accountsAvailable) payload.destinationAccountId = $('#post-account').value || null;
+    await api(editing ? `/api/posts/${encodeURIComponent(editing.id)}` : '/api/posts', { method: editing ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+    $('#editor').close(); await loadPosts();
+  } catch (error) { errorAt('#form-error', error.message); }
+  finally { setBusy(false); }
+});
+$('#new-post').addEventListener('click', () => openEditor());
+$('#empty-create').addEventListener('click', () => openEditor());
+$('#close-editor').addEventListener('click', () => $('#editor').close());
+$('#cancel-editor').addEventListener('click', () => $('#editor').close());
+$('#filter').addEventListener('change', render);
+$('#load-more').addEventListener('click', async () => { const button = $('#load-more'); button.disabled = true; try { await loadPosts(true); } finally { button.disabled = false; } });
+for (const link of document.querySelectorAll('[data-view]')) link.addEventListener('click', () => { document.querySelectorAll('[data-view]').forEach(el => el.classList.toggle('active', el === link)); $('#filter').value = link.dataset.view; render(); });
+(async () => {
+  try {
+    csrf = (await api('/api/auth/csrf')).csrfToken;
+    try { user = (await api('/api/auth/me')).user; showWorkspace(); await loadAccounts(); await loadPosts(); }
+    catch (error) { if (error.status !== 401) throw error; showLogin(); }
+  } catch (error) { showLogin(); errorAt('#login-error', 'Aplikasi tidak dapat terhubung ke server. Muat ulang halaman atau coba masuk lagi.'); }
+})();

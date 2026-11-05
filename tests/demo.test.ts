@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { JSDOM } from 'jsdom';
+
+test('alur demo menyimpan, mengajukan, menyetujui, dan menghapus konten', () => {
+  const html = readFileSync('demo/index.html', 'utf8');
+  const script = readFileSync('demo/app.js', 'utf8');
+  const dom = new JSDOM(html, { url: 'http://127.0.0.1:4173/', runScripts: 'outside-only' });
+  const { window } = dom;
+  const dialog = window.document.querySelector('#editor') as HTMLDialogElement;
+  dialog.showModal = () => { dialog.open = true; };
+  dialog.close = () => { dialog.open = false; };
+  window.confirm = () => true;
+  window.eval(script);
+  const get = (selector: string) => window.document.querySelector(selector) as HTMLElement;
+  const click = (selector: string) => get(selector).click();
+  click('#new-post');
+  assert.equal(dialog.open, true);
+  (get('#post-text') as HTMLTextAreaElement).value = 'Konten pengujian';
+  get('#post-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  assert.equal(dialog.open, false);
+  assert.equal(get('#total').textContent, '1');
+  assert.equal(get('.status').textContent, 'Draft');
+  const action = (label: string) => [...window.document.querySelectorAll<HTMLButtonElement>('.action')].find(button => button.textContent === label)!.click();
+  action('Ajukan');
+  assert.equal(get('#pending').textContent, '1');
+  action('Setujui');
+  assert.equal(get('.status').textContent, 'Disetujui');
+  action('Ubah');
+  get('#post-form').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  assert.equal(get('.status').textContent, 'Draft');
+  action('Hapus');
+  assert.equal(get('#total').textContent, '0');
+  assert.equal(get('#empty').hidden, false);
+  dom.window.close();
+});

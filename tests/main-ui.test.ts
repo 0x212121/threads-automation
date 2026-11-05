@@ -1,0 +1,86 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+import { JSDOM } from 'jsdom';
+import session from 'express-session';
+import request from 'supertest';
+import type { Pool } from 'pg';
+import { createApp } from '../src/app.js';
+import { bootstrapAdmin, INITIAL_ADMIN_EMAIL } from '../src/bootstrap-admin.js';
+
+async function waitFor(predicate: () => boolean) {
+  const end = Date.now() + 10000;
+  while (!predicate()) { if (Date.now() > end) throw new Error('UI tidak mencapai kondisi yang diharapkan'); await new Promise(resolve => setTimeout(resolve, 20)); }
+}
+
+test('antarmuka utama login, menyimpan draft di server dan menyetujuinya', async () => {
+  const db = new PGlite();
+  for (const migration of ['001_content.sql', '002_local_identity.sql', '006_password_reset.sql', '007_threads_accounts.sql', '009_publication_jobs.sql', '010_publication_resolutions.sql']) await db.exec(await readFile(`db/migrations/${migration}`, 'utf8'));
+  const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.rows.length }; };
+  const pool = { query, connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
+  await bootstrapAdmin(pool, 'kata sandi untuk pengujian');
+  await db.query('UPDATE local_users SET email_verified_at=now() WHERE email=$1', [INITIAL_ADMIN_EMAIL]);
+  await db.query("INSERT INTO threads_accounts(id,threads_user_id,username,connected_by,encrypted_token,token_iv,token_tag,token_expires_at,status) SELECT '99999999-9999-4999-8999-999999999999','123','akun-uji',id,'x','x','x',now()+interval '1 day','active' FROM local_users WHERE email=$1", [INITIAL_ADMIN_EMAIL]);
+  const origin = 'http://localhost:3000';
+  const sent: { to: string }[] = [];
+  const app = await createApp({ pool, store: new session.MemoryStore(), secret: 'a'.repeat(48), origin, secure: false, trustProxy: false, publishingEnabled: true, mail: { from: 'pengirim@example.test', transport: { sendMail: async message => { sent.push(message); return { accepted: [message.to], rejected: [] }; } } } });
+  assert.equal((await request(app).get('/')).status, 200);
+  assert.equal((await request(app).get('/assets/app.js')).status, 200);
+  const agent = request.agent(app);
+  const html = await readFile('public/index.html', 'utf8');
+  const script = await readFile('public/app.js', 'utf8');
+  const dom = new JSDOM(html, { url: origin, runScripts: 'outside-only' });
+  const win = dom.window;
+  const dialog = win.document.querySelector('#editor') as HTMLDialogElement;
+  dialog.showModal = () => { dialog.open = true; }; dialog.close = () => { dialog.open = false; };
+  const inviteDialog = win.document.querySelector('#invite-dialog') as HTMLDialogElement;
+  inviteDialog.showModal = () => { inviteDialog.open = true; }; inviteDialog.close = () => { inviteDialog.open = false; };
+  const scheduleDialog = win.document.querySelector('#schedule-dialog') as HTMLDialogElement;
+  scheduleDialog.showModal = () => { scheduleDialog.open = true; }; scheduleDialog.close = () => { scheduleDialog.open = false; };
+  win.confirm = () => true;
+  win.fetch = (async (input: string, init: RequestInit = {}) => {
+    const method = (init.method || 'GET').toLowerCase() as 'get' | 'post' | 'put';
+    let req = agent[method](input).set('Origin', origin);
+    for (const [key, value] of Object.entries(init.headers ?? {})) req = req.set(key, String(value));
+    if (init.body) req = req.send(String(init.body));
+    const response = await req;
+    return new Response(response.status === 204 ? null : JSON.stringify(response.body), { status: response.status, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  win.eval(script);
+  const get = (selector: string) => win.document.querySelector(selector) as HTMLElement;
+  await waitFor(() => !get('#login-screen').hidden);
+  (get('#email') as HTMLInputElement).value = INITIAL_ADMIN_EMAIL;
+  (get('#password') as HTMLInputElement).value = 'kata sandi untuk pengujian';
+  get('#login-form').dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+  await waitFor(() => !get('#workspace').hidden && get('#loading').hidden);
+  get('#new-post').click();
+  (get('#post-text') as HTMLTextAreaElement).value = 'Draft dari UI utama';
+  (get('#post-account') as HTMLSelectElement).value = '99999999-9999-4999-8999-999999999999';
+  get('#post-form').dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+  await waitFor(() => win.document.querySelector('.post-text')?.textContent === 'Draft dari UI utama');
+  const clickAction = (label: string) => [...win.document.querySelectorAll<HTMLButtonElement>('.action')].find(button => button.textContent === label)?.click();
+  clickAction('Ajukan');
+  await waitFor(() => win.document.querySelector('.status')?.textContent === 'Menunggu tinjauan');
+  clickAction('Setujui');
+  await waitFor(() => win.document.querySelector('.status')?.textContent === 'Disetujui');
+  const stored = await db.query<{ status: string }>('SELECT status FROM content_posts');
+  assert.equal(stored.rows[0]?.status, 'approved');
+  clickAction('Jadwalkan');
+  assert.equal(scheduleDialog.open, true);
+  (get('#schedule-time') as HTMLInputElement).value = new Date(Date.now()+3600000).toISOString().slice(0,16);
+  (get('#schedule-zone') as HTMLInputElement).value = 'UTC';
+  get('#schedule-form').dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+  await waitFor(() => win.document.querySelector('.post-row .field-help')?.textContent?.includes('Terjadwal') === true);
+  clickAction('Batalkan jadwal');
+  await waitFor(() => win.document.querySelector('.post-row .field-help')?.textContent?.includes('dibatalkan') === true);
+  await db.exec(await readFile('db/migrations/005_invitations.sql', 'utf8'));
+  get('#invite-member').click();
+  (get('#invite-email') as HTMLInputElement).value = 'tim@example.test';
+  get('#invite-form').dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+  await waitFor(() => sent.length === 1 && !inviteDialog.open);
+  assert.equal(sent[0]?.to, 'tim@example.test');
+  get('#logout').click();
+  await waitFor(() => !get('#login-screen').hidden);
+  dom.window.close(); await db.close();
+});

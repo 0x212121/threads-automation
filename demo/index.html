@@ -1,0 +1,50 @@
+﻿<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ruang konten | Demo Threads Automation</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><div><strong>Threads</strong><span>Automation</span></div></div>
+      <div class="side-caption">RUANG KERJA</div>
+      <nav aria-label="Navigasi utama">
+        <a href="#ringkasan" class="nav-link active" data-view="ringkasan"><span aria-hidden="true">◫</span> Ringkasan</a>
+        <a href="#konten" class="nav-link" data-view="konten"><span aria-hidden="true">▤</span> Semua konten</a>
+        <a href="#persetujuan" class="nav-link" data-view="persetujuan"><span aria-hidden="true">✓</span> Persetujuan <span class="nav-count" id="review-count">0</span></a>
+      </nav>
+      <div class="side-bottom"><span class="side-dot"></span><div><strong>Mode demonstrasi</strong><small>Data di browser ini</small></div></div>
+    </aside>
+    <main id="main">
+      <header class="topbar"><div class="breadcrumb">Ruang kerja <span>/</span> <strong id="breadcrumb">Ringkasan</strong></div><span class="local-label">● &nbsp; DEMO LOKAL</span></header>
+      <div class="page">
+        <div class="notice"><span class="notice-icon" aria-hidden="true">i</span><p><strong>Ini adalah demo.</strong> Konten tersimpan hanya di browser ini. Jadwal bersifat simulasi dan tidak akan dipublikasikan ke Threads.</p></div>
+        <section class="intro" id="ringkasan" aria-labelledby="page-title">
+          <div><div class="eyebrow">RUANG KONTEN</div><h1 id="page-title">Ide hari ini,<br><em>siap untuk nanti.</em></h1><p>Susun konten, tinjau bersama tim, dan lihat rencana publikasi dalam satu tempat.</p></div>
+          <button class="primary" id="new-post" type="button"><span aria-hidden="true">＋</span> Buat konten</button>
+        </section>
+        <section class="overview" aria-label="Ringkasan konten demo">
+          <div class="metric"><span>SEMUA KONTEN</span><strong id="total">0</strong><small>Konten di browser ini</small></div>
+          <div class="metric"><span>MENUNGGU TINJAUAN</span><strong id="pending">0</strong><small>Siap untuk diperiksa</small></div>
+          <div class="metric"><span>DISETUJUI</span><strong id="approved">0</strong><small>Termasuk yang dijadwalkan</small></div>
+          <div class="overview-note"><span class="note-symbol" aria-hidden="true">✳</span><p>Ruang kecil untuk<br><strong>ide yang besar.</strong></p><span class="note-line"></span><small>DIBUAT UNTUK ALUR KERJAMU</small></div>
+        </section>
+        <section class="content-section" id="konten" aria-labelledby="list-title"><span id="persetujuan"></span>
+          <div class="section-heading"><div><div class="eyebrow">DAFTAR KONTEN</div><h2 id="list-title">Semua konten <span id="list-count">0</span></h2><p id="list-subtitle">Semua ide dan rencana dalam satu tempat.</p></div><label class="filter-label" for="filter">Status <select id="filter"><option value="all">Semua status</option><option value="draft">Draft</option><option value="submitted">Menunggu tinjauan</option><option value="approved">Disetujui</option><option value="scheduled">Dijadwalkan</option></select></label></div>
+          <div id="storage-error" class="error" role="alert" hidden></div>
+          <div id="loading" class="empty">Memuat konten...</div>
+          <div id="empty" class="empty" hidden><div class="empty-icon" aria-hidden="true">✎</div><h3>Belum ada konten di sini</h3><p>Mulai dari satu ide. Buat draft pertamamu dan lihat alur peninjauannya.</p><button type="button" class="secondary" id="empty-create">Buat draft pertama</button></div>
+          <div class="list-wrap" id="list-wrap" hidden><div class="list-labels" aria-hidden="true"><span>KONTEN</span><span>STATUS</span><span>JADWAL SIMULASI</span><span>AKSI</span></div><div id="post-list"></div></div>
+        </section>
+        <footer>THREADS AUTOMATION <span>·</span> Demo lokal untuk peninjauan alur kerja</footer>
+      </div>
+    </main>
+  </div>
+  <dialog id="editor" aria-labelledby="editor-title"><form id="post-form"><div class="dialog-top"><div><div class="eyebrow">RUANG MENULIS</div><h2 id="editor-title">Buat konten</h2></div><button type="button" class="close" id="close-editor" aria-label="Tutup">×</button></div><p class="dialog-desc">Simpan ide sebagai draft. Konten tidak dikirim ke Threads.</p><label for="post-text">Isi konten</label><textarea id="post-text" name="text" rows="7" maxlength="5000" placeholder="Apa yang ingin kamu bagikan?" required></textarea><div class="field-help">Teks ini hanya tersimpan di browser. Batas Threads asli akan divalidasi saat integrasi tersedia.</div><label for="post-schedule">Rencana waktu <span>(opsional)</span></label><input type="datetime-local" id="post-schedule" name="schedule"><div class="field-help">Menggunakan zona waktu perangkat. Jadwal ini hanya untuk simulasi.</div><div id="form-error" class="error" role="alert" hidden></div><div class="dialog-actions"><button type="button" class="text-button" id="cancel-editor">Batal</button><button type="submit" class="primary">Simpan draft</button></div></form></dialog>
+  <template id="post-template"><article class="post-row"><div class="post-main"><span class="post-index" aria-hidden="true">↳</span><div><p class="post-text"></p><span class="post-created"></span></div></div><div><span class="status"></span></div><div class="post-schedule"></div><div class="post-actions"></div></article></template>
+</body>
+</html>

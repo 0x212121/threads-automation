@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+import type { Pool } from 'pg';
+import { TokenVault } from '../src/token-vault.js';
+import { ThreadsAccounts } from '../src/threads-accounts.js';
+
+test('token terenkripsi terikat pada akun dan hanya admin terverifikasi dapat menyimpan', async () => {
+  const db = new PGlite();
+  for (const name of ['001_content.sql', '002_local_identity.sql', '007_threads_accounts.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
+  const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.affectedRows ?? result.rows.length }; };
+  const pool = { connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
+  const admin = '11111111-1111-4111-8111-111111111111', editor = '22222222-2222-4222-8222-222222222222';
+  await db.query("INSERT INTO local_users (id,email,password_hash,role,email_verified_at) VALUES ($1,'admin@example.test','hash','admin',now()),($2,'editor@example.test','hash','editor',now())", [admin, editor]);
+  const vault = new TokenVault(Buffer.alloc(32, 7));
+  const store = new ThreadsAccounts(pool, vault);
+  const account = { threadsUserId: '12345', username: 'ujicoba', token: 'TOKEN-TEST-BUKAN-ASLI', expiresAt: new Date(Date.now() + 3600000) };
+  await assert.rejects(store.register(editor, account));
+  const id = await store.register(admin, account);
+  const rows = await db.query<{ encrypted_token: Uint8Array; token_iv: Uint8Array; token_tag: Uint8Array }>('SELECT encrypted_token,token_iv,token_tag FROM threads_accounts WHERE id=$1', [id]);
+  const row = rows.rows[0]!;
+  const sealed = { ciphertext: Buffer.from(row.encrypted_token), iv: Buffer.from(row.token_iv), tag: Buffer.from(row.token_tag) };
+  assert.equal(sealed.ciphertext.includes(Buffer.from(account.token)), false);
+  assert.equal(vault.open(sealed, `${id}:${account.threadsUserId}`), account.token);
+  assert.throws(() => vault.open(sealed, `${id}:akun-lain`));
+  sealed.ciphertext[0] = sealed.ciphertext[0]! ^ 1;
+  assert.throws(() => vault.open(sealed, `${id}:${account.threadsUserId}`));
+  const reconnected = await store.register(admin, { ...account, token: 'TOKEN-PENGGANTI' });
+  assert.equal(reconnected, id);
+  const updated = await db.query<{ encrypted_token: Uint8Array; token_iv: Uint8Array; token_tag: Uint8Array }>('SELECT encrypted_token,token_iv,token_tag FROM threads_accounts WHERE id=$1', [id]);
+  assert.equal(vault.open({ ciphertext: Buffer.from(updated.rows[0]!.encrypted_token), iv: Buffer.from(updated.rows[0]!.token_iv), tag: Buffer.from(updated.rows[0]!.token_tag) }, `${id}:${account.threadsUserId}`), 'TOKEN-PENGGANTI');
+  await db.close();
+});

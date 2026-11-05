@@ -1,0 +1,55 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+import session from 'express-session';
+import request from 'supertest';
+import type { Pool } from 'pg';
+import { createApp } from '../src/app.js';
+import { hashPassword } from '../src/password.js';
+import type { MailTransport } from '../src/smtp.js';
+
+test('undangan hanya oleh admin terverifikasi, sekali pakai dan mengikat email', async () => {
+  const db = new PGlite();
+  for (const name of ['002_local_identity.sql', '005_invitations.sql', '006_password_reset.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
+  const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.affectedRows ?? result.rows.length }; };
+  const pool = { query, connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
+  const hash = await hashPassword('kata sandi untuk pengujian');
+  await db.query("INSERT INTO local_users (id,email,password_hash,role,email_verified_at) VALUES ('11111111-1111-4111-8111-111111111111','admin@example.test',$1,'admin',now()),('22222222-2222-4222-8222-222222222222','editor@example.test',$1,'editor',now())", [hash]);
+  const sent: { to: string; text: string }[] = [];
+  const transport: MailTransport = { sendMail: async message => { sent.push(message); return { accepted: [message.to], rejected: [] }; } };
+  const origin = 'http://localhost:3000';
+  const app = await createApp({ pool, store: new session.MemoryStore(), secret: 'a'.repeat(48), origin, secure: false, trustProxy: false, mail: { transport, from: 'pengirim@example.test' } });
+  async function login(email: string, password = 'kata sandi untuk pengujian') {
+    const agent = request.agent(app), csrf = (await agent.get('/api/auth/csrf')).body.csrfToken;
+    const login = await agent.post('/api/auth/login').set('Origin', origin).set('X-CSRF-Token', csrf).send({ email, password });
+    assert.equal(login.status, 200);
+    return { agent, csrf: login.body.csrfToken, user: login.body.user };
+  }
+  const admin = await login('admin@example.test'), editor = await login('editor@example.test');
+  assert.equal((await editor.agent.post('/api/invitations').set('Origin', origin).set('X-CSRF-Token', editor.csrf).send({ email: 'new@example.test', role: 'admin' })).status, 403);
+  assert.equal((await admin.agent.post('/api/invitations').set('Origin', origin).set('X-CSRF-Token', admin.csrf).send({ email: 'NEW@example.test', role: 'reviewer' })).status, 204);
+  assert.equal(sent[0]?.to, 'new@example.test');
+  const oldToken = sent[0]?.text.match(/#invite=([A-Za-z0-9_-]{43})/)?.[1];
+  assert.ok(oldToken);
+  assert.equal((await admin.agent.post('/api/invitations').set('Origin', origin).set('X-CSRF-Token', admin.csrf).send({ email: 'new@example.test', role: 'reviewer' })).status, 204);
+  const token = sent[1]?.text.match(/#invite=([A-Za-z0-9_-]{43})/)?.[1];
+  assert.ok(token);
+  const invitee = request.agent(app), tokenCsrf = (await invitee.get('/api/auth/csrf')).body.csrfToken;
+  assert.equal((await invitee.post('/api/invitations/accept').set('Origin', origin).set('X-CSRF-Token', tokenCsrf).send({ token: oldToken, password: 'kata sandi undangan aman' })).status, 400);
+  assert.equal((await admin.agent.post('/api/invitations/accept').set('Origin', origin).set('X-CSRF-Token', admin.csrf).send({ token, password: 'kata sandi undangan aman' })).status, 409);
+  const accept = () => invitee.post('/api/invitations/accept').set('Origin', origin).set('X-CSRF-Token', tokenCsrf).send({ token, password: 'kata sandi undangan aman' });
+  assert.equal((await accept()).status, 204);
+  assert.equal((await accept()).status, 400);
+  const member = await login('new@example.test', 'kata sandi undangan aman');
+  assert.equal(member.user.role, 'reviewer');
+  assert.equal(member.user.emailVerified, true);
+  assert.equal((await admin.agent.post('/api/invitations').set('Origin', origin).set('X-CSRF-Token', admin.csrf).send({ email: 'expired@example.test', role: 'editor' })).status, 204);
+  const expired = sent[2]?.text.match(/#invite=([A-Za-z0-9_-]{43})/)?.[1];
+  assert.ok(expired);
+  await db.query("UPDATE team_invitations SET expires_at=now()-interval '1 second' WHERE email='expired@example.test'");
+  assert.equal((await invitee.post('/api/invitations/accept').set('Origin', origin).set('X-CSRF-Token', tokenCsrf).send({ token: expired, password: 'kata sandi undangan aman' })).status, 400);
+  const row = await db.query<{ token_hash: string }>('SELECT token_hash FROM team_invitations');
+  assert.notEqual(row.rows[0]?.token_hash, token);
+  await db.close();
+});
