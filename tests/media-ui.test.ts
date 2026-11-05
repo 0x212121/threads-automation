@@ -67,3 +67,42 @@ test('komposer mengunggah lampiran, menangani kegagalan simpan, dan membersihkan
     assert.ok(requests.some(call=>call.path==='/api/media/media-1' && call.method==='DELETE'));
   } finally { win.close(); }
 });
+
+test('komposer membagi teks dan menyimpan urutan carousel pada draft', async () => {
+  const [html,script]=await Promise.all([readFile('public/index.html','utf8'),readFile('public/app.js','utf8')]);
+  const dom=new JSDOM(html,{url:'https://example.test',runScripts:'outside-only',virtualConsole:new VirtualConsole()}), win=dom.window;
+  try {
+    const editor=win.document.querySelector('#editor') as HTMLDialogElement;
+    editor.showModal=()=>{editor.open=true;}; editor.close=()=>{editor.open=false; editor.dispatchEvent(new win.Event('close'));};
+    win.URL.createObjectURL=()=> 'blob:https://example.test/preview'; win.URL.revokeObjectURL=()=>{};
+    let saved:Record<string,unknown>|null=null, uploads=0; const uploadedNames:string[]=[];
+    win.fetch=(async (path:string,init:RequestInit={}) => {
+      let data:unknown={}, status=200;
+      if (path==='/api/auth/csrf') data={csrfToken:'csrf'};
+      else if (path==='/api/auth/me') data={user:{id:'user1',email:'a@example.test',role:'admin',emailVerified:true}};
+      else if (path==='/api/threads/accounts') data={accounts:[]};
+      else if (path==='/api/threads/config') data={configured:false,publishingEnabled:false};
+      else if (path.startsWith('/api/posts?')) data={posts:[],nextOffset:null};
+      else if (path==='/api/media') { uploadedNames.push(((init.body as FormData).get('file') as File).name); data={media:{id:`media-${++uploads}`,kind:'IMAGE'}}; status=201; }
+      else if (path==='/api/posts') { saved=JSON.parse(String(init.body)); data={post:{id:'post'}}; status=201; }
+      else throw new Error(`Unexpected endpoint ${path}`);
+      return new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json'}});
+    }) as typeof fetch;
+    win.eval(script);
+    const get=(selector:string)=>win.document.querySelector(selector) as HTMLElement;
+    await waitFor(()=>!get('#workspace').hidden && get('#loading').hidden);
+    get('#new-post').click();
+    (get('#post-text') as HTMLTextAreaElement).value='Kata '.repeat(120);
+    get('#split-post').click();
+    assert.ok(win.document.querySelector('#post-replies textarea'));
+    const input=get('#post-media') as HTMLInputElement;
+    Object.defineProperty(input,'files',{configurable:true,value:[new win.File(['1'],'a.png',{type:'image/png'}),new win.File(['2'],'b.png',{type:'image/png'})]});
+    input.dispatchEvent(new win.Event('change',{bubbles:true}));
+    assert.equal(win.document.querySelectorAll('#media-preview img').length,2);
+    ([...win.document.querySelectorAll('#media-preview button')].find(button=>button.textContent==='Turun gambar 1') as HTMLButtonElement).click();
+    get('#post-form').dispatchEvent(new win.Event('submit',{bubbles:true,cancelable:true}));
+    await waitFor(()=>saved !== null);
+    const payload=saved as unknown as {body:string;replies:string[];mediaIds:string[]};
+    assert.ok(payload.body.length<=500); assert.equal(payload.replies.length,1); assert.deepEqual(payload.mediaIds,['media-1','media-2']); assert.deepEqual(uploadedNames,['b.png','a.png']);
+  } finally { win.close(); }
+});

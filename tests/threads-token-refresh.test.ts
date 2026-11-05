@@ -1,0 +1,52 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+import type { Pool } from 'pg';
+import { TokenVault } from '../src/token-vault.js';
+import { refreshOneToken } from '../src/threads-token-refresh.js';
+
+test('refresh memperbarui token terenkripsi dan tidak menimpa koneksi ulang', async () => {
+  const db = new PGlite();
+  for (const file of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','013_token_refresh.sql']) await db.exec(await readFile(`db/migrations/${file}`,'utf8'));
+  const query = async (sql: string, params?: unknown[]) => { const result = await db.query(sql,params); return { ...result, rowCount: result.affectedRows ?? result.rows.length }; };
+  const pool = { query } as unknown as Pool;
+  const vault = new TokenVault(Buffer.alloc(32, 2));
+  const user='11111111-1111-4111-8111-111111111111', account='22222222-2222-4222-8222-222222222222';
+  await query("INSERT INTO local_users(id,email,password_hash,role,email_verified_at) VALUES ($1,'admin@example.test','hash','admin',now())",[user]);
+  const old = vault.seal('old-test-token',`${account}:123`);
+  await query("INSERT INTO threads_accounts(id,threads_user_id,username,connected_by,encrypted_token,token_iv,token_tag,token_expires_at,status) VALUES ($1,'123','test',$2,$3,$4,$5,now()+interval '1 day','active')",[account,user,old.ciphertext,old.iv,old.tag]);
+  const request = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    assert.equal(url.origin + url.pathname,'https://graph.threads.net/refresh_access_token');
+    assert.equal(url.searchParams.get('grant_type'),'th_refresh_token');
+    assert.equal(new Headers(init?.headers).get('authorization'),'Bearer old-test-token');
+    assert.equal(url.toString().includes('old-test-token'),false);
+    return Response.json({ access_token:'new-test-token',expires_in: 60*86400 });
+  }) as typeof fetch;
+  assert.equal(await refreshOneToken(pool,vault,request),true);
+  const result = await query('SELECT encrypted_token,token_iv,token_tag FROM threads_accounts WHERE id=$1',[account]);
+  const row = result.rows[0] as { encrypted_token: Uint8Array; token_iv: Uint8Array; token_tag: Uint8Array };
+  assert.equal(vault.open({ciphertext:Buffer.from(row.encrypted_token),iv:Buffer.from(row.token_iv),tag:Buffer.from(row.token_tag)},`${account}:123`),'new-test-token');
+  assert.equal(await refreshOneToken(pool,vault,request),false);
+  await query("UPDATE threads_accounts SET token_expires_at=now()+interval '1 day',token_issued_at=now()-interval '25 hours' WHERE id=$1",[account]);
+  const reconnect = vault.seal('reconnected-test-token',`${account}:123`);
+  const race = (async () => {
+    await query("UPDATE threads_accounts SET encrypted_token=$2,token_iv=$3,token_tag=$4,token_expires_at=now()+interval '60 days',refresh_lease=NULL,refresh_lease_until=NULL WHERE id=$1",[account,reconnect.ciphertext,reconnect.iv,reconnect.tag]);
+    return Response.json({access_token:'stale-test-token',expires_in:60*86400});
+  }) as typeof fetch;
+  assert.equal(await refreshOneToken(pool,vault,race),true);
+  const final = await query('SELECT encrypted_token,token_iv,token_tag FROM threads_accounts WHERE id=$1',[account]);
+  const last = final.rows[0] as { encrypted_token: Uint8Array; token_iv: Uint8Array; token_tag: Uint8Array };
+  assert.equal(vault.open({ciphertext:Buffer.from(last.encrypted_token),iv:Buffer.from(last.token_iv),tag:Buffer.from(last.token_tag)},`${account}:123`),'reconnected-test-token');
+  await query("UPDATE threads_accounts SET token_expires_at=now()+interval '1 day',token_issued_at=now()-interval '25 hours' WHERE id=$1",[account]);
+  assert.equal(await refreshOneToken(pool,vault,(async () => new Response('',{status:429})) as typeof fetch),true);
+  assert.equal((await query('SELECT refresh_status FROM threads_accounts WHERE id=$1',[account])).rows[0]?.refresh_status,'retry');
+  assert.equal(await refreshOneToken(pool,vault,request),false);
+  await query("UPDATE threads_accounts SET refresh_next_attempt_at=now()-interval '1 minute' WHERE id=$1",[account]);
+  assert.equal(await refreshOneToken(pool,vault,(async () => new Response('',{status:401})) as typeof fetch),true);
+  assert.equal((await query('SELECT refresh_status FROM threads_accounts WHERE id=$1',[account])).rows[0]?.refresh_status,'reconnect');
+  await query("UPDATE threads_accounts SET refresh_status='ok',refresh_next_attempt_at=NULL,token_expires_at=now()-interval '1 minute' WHERE id=$1",[account]);
+  assert.equal(await refreshOneToken(pool,vault,request),false);
+  await db.close();
+});

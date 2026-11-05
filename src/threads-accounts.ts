@@ -18,9 +18,9 @@ export class ThreadsAccounts {
       const id = existing.rows[0]?.id ?? randomUUID();
       const sealed = this.vault.seal(account.token, `${id}:${account.threadsUserId}`);
       if (existing.rows[0]) {
-        await client.query("UPDATE threads_accounts SET username=$2,connected_by=$3,encrypted_token=$4,token_iv=$5,token_tag=$6,token_expires_at=$7,status='active',updated_at=now() WHERE id=$1", [id, account.username.trim(), adminId, sealed.ciphertext, sealed.iv, sealed.tag, account.expiresAt]);
+        await client.query("UPDATE threads_accounts SET username=$2,connected_by=$3,encrypted_token=$4,token_iv=$5,token_tag=$6,token_expires_at=$7,token_issued_at=now(),status='active',refresh_lease=NULL,refresh_lease_until=NULL,refresh_next_attempt_at=NULL,refresh_failures=0,refresh_status='ok',updated_at=now() WHERE id=$1", [id, account.username.trim(), adminId, sealed.ciphertext, sealed.iv, sealed.tag, account.expiresAt]);
       } else {
-        await client.query("INSERT INTO threads_accounts (id,threads_user_id,username,connected_by,encrypted_token,token_iv,token_tag,token_expires_at,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active')", [id, account.threadsUserId, account.username.trim(), adminId, sealed.ciphertext, sealed.iv, sealed.tag, account.expiresAt]);
+        await client.query("INSERT INTO threads_accounts (id,threads_user_id,username,connected_by,encrypted_token,token_iv,token_tag,token_expires_at,token_issued_at,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),'active')", [id, account.threadsUserId, account.username.trim(), adminId, sealed.ciphertext, sealed.iv, sealed.tag, account.expiresAt]);
       }
       await client.query('COMMIT');
       return id;

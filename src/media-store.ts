@@ -84,7 +84,7 @@ export class MediaStore {
   }
   async preview(id: string, userId: string) {
     if (!uuid.test(id)) return null;
-    const result = await this.pool.query<Asset>('SELECT m.* FROM media_assets m WHERE m.id=$1 AND (m.uploaded_by=$2 OR EXISTS (SELECT 1 FROM content_versions v WHERE v.media_id=m.id))', [id,userId]);
+    const result = await this.pool.query<Asset>('SELECT m.* FROM media_assets m WHERE m.id=$1 AND (m.uploaded_by=$2 OR EXISTS (SELECT 1 FROM content_version_media v WHERE v.media_id=m.id))', [id,userId]);
     return result.rows[0] ?? null;
   }
   async removeUnattached(id: string, userId: string) {
@@ -94,7 +94,7 @@ export class MediaStore {
       await client.query('BEGIN');
       const asset = (await client.query<Asset>('SELECT * FROM media_assets WHERE id=$1 AND uploaded_by=$2 FOR UPDATE', [id,userId])).rows[0];
       if (!asset) throw new MediaError('Media tidak ditemukan.');
-      const used = await client.query('SELECT post_id FROM content_versions WHERE media_id=$1 LIMIT 1', [id]);
+      const used = await client.query('SELECT post_id FROM content_version_media WHERE media_id=$1 LIMIT 1', [id]);
       if (used.rows[0]) throw new MediaError('Media tersimpan pada riwayat konten dan tidak dapat dihapus langsung.');
       try { await unlink(this.path(id,asset.kind)); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new MediaError('Berkas media belum dapat dihapus dari penyimpanan.'); }
@@ -111,7 +111,7 @@ export class MediaStore {
   async publicDownload(job: string, media: string, expires: string, signature: string) {
     if (!uuid.test(job) || !uuid.test(media) || !/^[0-9]{10,12}$/.test(expires) || Number(expires) < Date.now()/1000 || !/^[A-Za-z0-9_-]{43}$/.test(signature)) return null;
     if (!timingSafeEqual(Buffer.from(signature), Buffer.from(this.sign(job,media,expires)))) return null;
-    const result = await this.pool.query<Asset>("SELECT m.* FROM media_assets m JOIN content_versions v ON v.media_id=m.id JOIN publication_jobs j ON j.post_id=v.post_id AND j.content_version=v.version WHERE m.id=$1 AND j.id=$2 AND j.status IN ('preparing','prepared','publishing','published','uncertain','confirmed_published')", [media,job]);
+    const result = await this.pool.query<Asset>("SELECT m.* FROM media_assets m JOIN content_version_media v ON v.media_id=m.id JOIN publication_jobs j ON j.post_id=v.post_id AND j.content_version=v.version WHERE m.id=$1 AND j.id=$2 AND j.status IN ('preparing','prepared','publishing','published','uncertain','confirmed_published')", [media,job]);
     return result.rows[0] ?? null;
   }
 }

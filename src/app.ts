@@ -17,6 +17,7 @@ import { ThreadsAccounts } from './threads-accounts.js';
 import { TokenVault } from './token-vault.js';
 import { ThreadsOAuthClient, ThreadsOAuthError } from './threads-oauth-client.js';
 import { PublicationRequests, PublicationRequestError } from './publication-requests.js';
+import { verifyPublishedPart } from './verify-published-part.js';
 import { MediaStore, MediaError, MEDIA_UPLOAD_LIMIT } from './media-store.js';
 
 declare module 'express-session' {
@@ -201,7 +202,8 @@ export async function createApp(options: Options) {
   app.get('/api/threads/accounts', requireUser, async (_req, res, next) => {
     try {
       const result = await options.pool.query("SELECT id, username, status FROM threads_accounts WHERE status='active' AND token_expires_at > now() ORDER BY username, id");
-      res.set('Cache-Control', 'no-store').json({ accounts: result.rows });
+      const attention = await options.pool.query("SELECT username, CASE WHEN token_expires_at<=now() THEN 'expired' ELSE refresh_status END AS reason FROM threads_accounts WHERE status='active' AND (token_expires_at<=now() OR refresh_status IN ('retry','reconnect')) ORDER BY username,id");
+      res.set('Cache-Control', 'no-store').json({ accounts: result.rows, attention: attention.rows });
     } catch (error) { next(error); }
   });
   const verification = new EmailVerification(options.pool);
@@ -282,7 +284,7 @@ export async function createApp(options: Options) {
     try {
       const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
       if (!Number.isSafeInteger(offset) || offset < 0 || offset > Number.MAX_SAFE_INTEGER - 50) { res.status(400).json({ error: 'Offset tidak valid.' }); return; }
-      const result = await options.pool.query('SELECT p.id, p.created_by, p.status, p.current_version, p.revision, p.created_at, p.updated_at, v.body, v.media_id, m.kind AS media_kind, v.destination_account_id, a.username AS destination_username, j.id AS job_id, j.status AS job_status, j.scheduled_at, j.time_zone, j.published_id, j.failure_code FROM content_posts p JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version LEFT JOIN media_assets m ON m.id=v.media_id LEFT JOIN threads_accounts a ON a.id=v.destination_account_id LEFT JOIN LATERAL (SELECT id,status,scheduled_at,time_zone,published_id,failure_code FROM publication_jobs WHERE post_id=p.id ORDER BY created_at DESC,id DESC LIMIT 1) j ON true ORDER BY p.created_at DESC, p.id DESC LIMIT 51 OFFSET $1', [offset]);
+      const result = await options.pool.query("SELECT p.id, p.created_by, p.status, p.current_version, p.revision, p.created_at, p.updated_at, v.body, v.media_id, m.kind AS media_kind, COALESCE((SELECT json_agg(json_build_object('id',cm.media_id,'kind',ma.kind) ORDER BY cm.position) FROM content_version_media cm JOIN media_assets ma ON ma.id=cm.media_id WHERE cm.post_id=p.id AND cm.version=p.current_version),'[]'::json) AS media, COALESCE((SELECT json_agg(r.body ORDER BY r.position) FROM content_version_replies r WHERE r.post_id=p.id AND r.version=p.current_version),'[]'::json) AS replies, v.destination_account_id, a.username AS destination_username, j.id AS job_id, j.status AS job_status, j.part_index, j.scheduled_at, j.time_zone, j.published_id, j.failure_code FROM content_posts p JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version LEFT JOIN media_assets m ON m.id=v.media_id LEFT JOIN threads_accounts a ON a.id=v.destination_account_id LEFT JOIN LATERAL (SELECT id,status,part_index,scheduled_at,time_zone,published_id,failure_code FROM publication_jobs WHERE post_id=p.id ORDER BY created_at DESC,id DESC LIMIT 1) j ON true ORDER BY p.created_at DESC, p.id DESC LIMIT 51 OFFSET $1", [offset]);
       const hasMore = result.rows.length > 50;
       res.set('Cache-Control', 'no-store').json({ posts: result.rows.slice(0, 50), nextOffset: hasMore && offset <= Number.MAX_SAFE_INTEGER - 100 ? offset + 50 : null });
     } catch (error) { next(error); }
@@ -290,18 +292,18 @@ export async function createApp(options: Options) {
   app.post('/api/posts', requireUser, checkCsrf, async (req, res, next) => {
     try {
       const body = req.body;
-      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['body', 'destinationAccountId','mediaId'].includes(key)) || typeof body.body !== 'string' || (body.mediaId != null && typeof body.mediaId !== 'string') || (body.destinationAccountId != null && typeof body.destinationAccountId !== 'string')) { res.status(400).json({ error: 'Masukan tidak valid.' }); return; }
+      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['body', 'destinationAccountId','mediaId','mediaIds','replies'].includes(key)) || typeof body.body !== 'string' || (body.mediaId != null && typeof body.mediaId !== 'string') || (body.mediaIds !== undefined && !Array.isArray(body.mediaIds)) || (body.replies !== undefined && !Array.isArray(body.replies)) || (body.destinationAccountId != null && typeof body.destinationAccountId !== 'string')) { res.status(400).json({ error: 'Masukan tidak valid.' }); return; }
       const actor = res.locals.user as User;
-      const post = await content.create({ id: actor.id, role: actor.role }, { body: body.body, destinationAccountId: body.destinationAccountId ?? null, mediaId: body.mediaId ?? null });
+      const post = await content.create({ id: actor.id, role: actor.role }, { body: body.body, destinationAccountId: body.destinationAccountId ?? null, mediaId: body.mediaId, mediaIds: body.mediaIds, replies: body.replies });
       res.set('Cache-Control', 'no-store').status(201).json({ post });
     } catch (error) { if (error instanceof DomainError) { res.status(400).json({ error: error.message }); return; } next(error); }
   });
   app.put('/api/posts/:id', requireUser, checkCsrf, async (req, res, next) => {
     try {
       const data = req.body;
-      if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !['body', 'revision', 'destinationAccountId','mediaId'].includes(key)) || typeof data.body !== 'string' || !Number.isSafeInteger(data.revision) || (data.mediaId != null && typeof data.mediaId !== 'string') || (data.destinationAccountId != null && typeof data.destinationAccountId !== 'string')) { res.status(400).json({ error: 'Masukan tidak valid.' }); return; }
+      if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !['body', 'revision', 'destinationAccountId','mediaId','mediaIds','replies'].includes(key)) || typeof data.body !== 'string' || !Number.isSafeInteger(data.revision) || (data.mediaId != null && typeof data.mediaId !== 'string') || (data.mediaIds !== undefined && !Array.isArray(data.mediaIds)) || (data.replies !== undefined && !Array.isArray(data.replies)) || (data.destinationAccountId != null && typeof data.destinationAccountId !== 'string')) { res.status(400).json({ error: 'Masukan tidak valid.' }); return; }
       const actor = res.locals.user as User;
-      const post = await content.edit({ id: actor.id, role: actor.role }, req.params.id as string, data.revision, { body: data.body, destinationAccountId: data.destinationAccountId, mediaId: data.mediaId });
+      const post = await content.edit({ id: actor.id, role: actor.role }, req.params.id as string, data.revision, { body: data.body, destinationAccountId: data.destinationAccountId, mediaId: data.mediaId, mediaIds: data.mediaIds, replies: data.replies });
       res.set('Cache-Control', 'no-store').json({ post });
     } catch (error) {
       if (error instanceof PermissionError) { res.status(403).json({ error: error.message }); return; }
@@ -331,10 +333,20 @@ export async function createApp(options: Options) {
   app.post('/api/posts/:id/schedules/:jobId/resolve', requireUser, checkCsrf, async (req, res, next) => {
     try {
       const data = req.body;
-      if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !['revision','decision','acknowledged'].includes(key)) || !Number.isSafeInteger(data.revision) || !['published','not_published'].includes(data.decision) || data.acknowledged !== true) { res.status(400).json({ error: 'Konfirmasi pemeriksaan Threads diperlukan.' }); return; }
-      const job = await publicationRequests.resolveUncertain((res.locals.user as User).id, req.params.id as string, data.revision, req.params.jobId as string, data.decision);
+      if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !['revision','decision','acknowledged','publishedId'].includes(key)) || !Number.isSafeInteger(data.revision) || !['published','not_published'].includes(data.decision) || data.acknowledged !== true || (data.publishedId !== undefined && typeof data.publishedId !== 'string')) { res.status(400).json({ error: 'Konfirmasi pemeriksaan Threads diperlukan.' }); return; }
+      if (data.publishedId !== undefined && (data.decision !== 'published' || !options.threads || !await verifyPublishedPart(options.pool,options.threads.vault,(res.locals.user as User).id,req.params.id as string,req.params.jobId as string,data.publishedId))) { res.status(409).json({error:'ID posting belum dapat diverifikasi pada akun dan isi yang disetujui. Periksa ID dan akses Meta, lalu coba lagi.'}); return; }
+      const job = await publicationRequests.resolveUncertain((res.locals.user as User).id, req.params.id as string, data.revision, req.params.jobId as string, data.decision, data.publishedId);
       res.set('Cache-Control', 'no-store').json({ job });
     } catch (error) { if (error instanceof PublicationRequestError) { res.status(409).json({ error: error.message }); return; } next(error); }
+  });
+  app.post('/api/posts/:id/schedules/:jobId/resume', requireUser, checkCsrf, async (req, res, next) => {
+    if (!options.publishingEnabled) { res.status(503).json({ error: 'Worker publikasi belum diaktifkan.' }); return; }
+    try {
+      const data=req.body;
+      if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => key !== 'revision') || !Number.isSafeInteger(data.revision)) { res.status(400).json({error:'Masukan tidak valid.'}); return; }
+      const job=await publicationRequests.resume((res.locals.user as User).id,req.params.id as string,data.revision,req.params.jobId as string);
+      res.set('Cache-Control','no-store').json({job});
+    } catch (error) { if (error instanceof PublicationRequestError) { res.status(409).json({error:error.message}); return; } next(error); }
   });
   app.post('/api/posts/:id/schedules/:jobId/:action', requireUser, checkCsrf, async (req, res, next) => {
     try {

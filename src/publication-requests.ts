@@ -34,6 +34,7 @@ export class PublicationRequests {
     try {
       return await this.transaction(async client => {
         const post = await this.authorize(client, userId, postId, revision);
+        await this.preventRepeatedParts(client,postId);
         const result = await client.query<{ id: string; status: string; scheduled_at: Date }>("INSERT INTO publication_jobs (id,post_id,content_version,account_id,requested_by,scheduled_at,time_zone,next_attempt_at,status) SELECT $1,$2,$3,$4,$5,$6,$7,$6,'scheduled' WHERE $6::timestamptz>now() AND EXISTS (SELECT 1 FROM threads_accounts WHERE id=$4 AND token_expires_at>$6::timestamptz) RETURNING id,status,scheduled_at", [randomUUID(), postId, post.current_version, post.destination_account_id, userId, instant, timeZone]);
         if (!result.rows[0]) throw new PublicationRequestError('Waktu harus di masa depan dan sebelum token akun kedaluwarsa.');
         return result.rows[0];
@@ -48,6 +49,7 @@ export class PublicationRequests {
     try {
       return await this.transaction(async client => {
         const post = await this.authorize(client, userId, postId, revision);
+        await this.preventRepeatedParts(client,postId);
         const result = await client.query<{ id: string; status: string; scheduled_at: Date }>("INSERT INTO publication_jobs (id,post_id,content_version,account_id,requested_by,scheduled_at,time_zone,next_attempt_at,status) VALUES ($1,$2,$3,$4,$5,now(),$6,now(),'scheduled') RETURNING id,status,scheduled_at", [randomUUID(), postId, post.current_version, post.destination_account_id, userId, timeZone]);
         return result.rows[0]!;
       });
@@ -65,21 +67,40 @@ export class PublicationRequests {
     return this.transaction(async client => {
       await this.authorize(client, userId, postId, revision, action !== 'cancel');
       const result = action === 'cancel'
-        ? await client.query("UPDATE publication_jobs SET status='cancelled',updated_at=now() WHERE id=$1 AND post_id=$2 AND status='scheduled' AND lease_token IS NULL RETURNING id,status,scheduled_at", [jobId, postId])
-        : await client.query("UPDATE publication_jobs SET scheduled_at=$3,time_zone=$4,next_attempt_at=$3,updated_at=now() WHERE id=$1 AND post_id=$2 AND status='scheduled' AND lease_token IS NULL AND $3::timestamptz>now() AND EXISTS (SELECT 1 FROM threads_accounts WHERE id=publication_jobs.account_id AND token_expires_at>$3::timestamptz) RETURNING id,status,scheduled_at", [jobId, postId, instant, timeZone]);
+        ? await client.query("UPDATE publication_jobs SET status='cancelled',updated_at=now() WHERE id=$1 AND post_id=$2 AND status='scheduled' AND part_index=0 AND lease_token IS NULL RETURNING id,status,scheduled_at", [jobId, postId])
+        : await client.query("UPDATE publication_jobs SET scheduled_at=$3,time_zone=$4,next_attempt_at=$3,updated_at=now() WHERE id=$1 AND post_id=$2 AND status='scheduled' AND part_index=0 AND lease_token IS NULL AND $3::timestamptz>now() AND EXISTS (SELECT 1 FROM threads_accounts WHERE id=publication_jobs.account_id AND token_expires_at>$3::timestamptz) RETURNING id,status,scheduled_at", [jobId, postId, instant, timeZone]);
       if (!result.rows[0]) throw new PublicationRequestError('Jadwal sudah diproses, tidak ditemukan, atau waktunya tidak valid.');
       return result.rows[0];
     });
   }
-  async resolveUncertain(userId: string, postId: string, revision: number, jobId: string, decision: 'published' | 'not_published') {
+  private async preventRepeatedParts(client: PoolClient, postId: string) {
+    const existing = await client.query("SELECT 1 FROM publication_jobs j JOIN publication_parts p ON p.job_id=j.id WHERE j.post_id=$1 AND p.status='published' LIMIT 1",[postId]);
+    if (existing.rowCount) throw new PublicationRequestError('Sebagian rangkaian sudah terbit; lanjutkan pekerjaan yang ada agar tidak mengulang bagian awal.');
+  }
+  async resume(userId: string, postId: string, revision: number, jobId: string) {
+    if (!uuid.test(jobId)) throw new PublicationRequestError('Identitas publikasi tidak valid.');
+    return this.transaction(async client => {
+      await this.authorize(client,userId,postId,revision);
+      const result = await client.query<{id:string;status:string;scheduled_at:Date}>("UPDATE publication_jobs j SET status='scheduled',requested_by=$3,scheduled_at=now(),next_attempt_at=now(),container_id=NULL,failure_code=NULL,updated_at=now() WHERE j.id=$1 AND j.post_id=$2 AND j.status='needs_action' AND j.lease_token IS NULL AND j.part_index>0 AND j.reply_to_id IS NOT NULL AND EXISTS (SELECT 1 FROM publication_parts p WHERE p.job_id=j.id AND p.position=j.part_index-1 AND p.status='published' AND p.published_id=j.reply_to_id) AND NOT EXISTS (SELECT 1 FROM publication_parts p WHERE p.job_id=j.id AND p.position=j.part_index AND p.status IN ('publishing','published','uncertain')) RETURNING id,status,scheduled_at",[jobId,postId,userId]);
+      if (!result.rows[0]) throw new PublicationRequestError('Rangkaian belum dapat dilanjutkan. Periksa hasil bagian terakhir terlebih dahulu.');
+      await client.query('INSERT INTO publication_resumptions(id,job_id,resumed_by,position) SELECT $1,id,$2,part_index FROM publication_jobs WHERE id=$3',[randomUUID(),userId,jobId]);
+      return result.rows[0];
+    });
+  }
+  async resolveUncertain(userId: string, postId: string, revision: number, jobId: string, decision: 'published' | 'not_published', publishedId?: string) {
     if (!uuid.test(jobId) || !['published','not_published'].includes(decision)) throw new PublicationRequestError('Keputusan tidak valid.');
+    if (publishedId !== undefined && !/^[0-9]{1,30}$/.test(publishedId)) throw new PublicationRequestError('ID posting Threads tidak valid.');
     return this.transaction(async client => {
       await this.authorize(client, userId, postId, revision, false);
-      const status = decision === 'published' ? 'confirmed_published' : 'needs_action';
-      const updated = await client.query('UPDATE publication_jobs SET status=$3,updated_at=now() WHERE id=$1 AND post_id=$2 AND status=\'uncertain\' RETURNING id,status,scheduled_at', [jobId, postId, status]);
-      if (!updated.rows[0]) throw new PublicationRequestError('Hasil tidak pasti tidak ditemukan atau sudah ditangani.');
+      const locked = await client.query<{part_index:number;content_version:number}>("SELECT part_index,content_version FROM publication_jobs WHERE id=$1 AND post_id=$2 AND status='uncertain' FOR UPDATE",[jobId,postId]);
+      const job=locked.rows[0]; if (!job) throw new PublicationRequestError('Hasil tidak pasti tidak ditemukan atau sudah ditangani.');
+      const next = await client.query('SELECT position FROM content_version_replies WHERE post_id=$1 AND version=$2 AND position=$3',[postId,job.content_version,job.part_index+1]);
+      if (decision==='published' && next.rowCount && !publishedId) throw new PublicationRequestError('ID posting yang terbit diperlukan untuk melanjutkan balasan berikutnya.');
+      await client.query("INSERT INTO publication_parts(job_id,position,status,published_id) VALUES ($1,$2,$3,$4) ON CONFLICT (job_id,position) DO UPDATE SET status=EXCLUDED.status,published_id=EXCLUDED.published_id",[jobId,job.part_index,decision === 'published' ? 'published' : 'not_published',publishedId ?? null]);
+      const status = decision === 'published' && !next.rowCount ? 'confirmed_published' : 'needs_action';
+      const updated = await client.query<{id:string;status:string;scheduled_at:Date}>("UPDATE publication_jobs SET status=$3,part_index=CASE WHEN $4::boolean THEN part_index+1 ELSE part_index END,reply_to_id=CASE WHEN $4::boolean THEN $5 ELSE reply_to_id END,container_id=NULL,updated_at=now() WHERE id=$1 AND post_id=$2 RETURNING id,status,scheduled_at", [jobId,postId,status,decision==='published' && !!next.rowCount,publishedId ?? null]);
       await client.query('INSERT INTO publication_resolutions(id,job_id,resolved_by,decision) VALUES ($1,$2,$3,$4)', [randomUUID(),jobId,userId,decision]);
-      return updated.rows[0];
+      return updated.rows[0]!;
     });
   }
 }

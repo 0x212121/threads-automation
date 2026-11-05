@@ -2,7 +2,8 @@
 const statusLabels = { draft: 'Draft', submitted: 'Menunggu tinjauan', approved: 'Disetujui', rejected: 'Ditolak' };
 let csrf = '', user = null, posts = [], accounts = [], accountsAvailable = true, threadsConfigured = null, publishingEnabled = false, nextOffset = null, editing = null, scheduling = null, busy = false;
 let threadsConnecting = false;
-let editorMedia = null, pendingMedia = null, previewObjectUrl = null, uploadedMediaIds = new Set();
+let threadsAttention = [];
+let editorMedia = [], previewObjectUrls = [], uploadedMediaIds = new Set();
 const linkParams = new URLSearchParams(location.hash.slice(1));
 let verificationToken = linkParams.get('verify'), invitationToken = linkParams.get('invite'), resetToken = linkParams.get('reset');
 let threadsResult = linkParams.get('threads');
@@ -24,8 +25,8 @@ function errorAt(id, message) { const element = $(id); element.textContent = mes
 function setBusy(value) {
   busy = value;
   $('#save-post').disabled = value;
-  for (const id of ['#post-media','#remove-media','#close-editor','#cancel-editor','#logout','#new-post','#empty-create']) $(id).disabled = value;
-  document.querySelectorAll('.action').forEach(button => { button.disabled = value; });
+  for (const id of ['#post-media','#remove-media','#split-post','#add-reply','#close-editor','#cancel-editor','#logout','#new-post','#empty-create']) $(id).disabled = value;
+  document.querySelectorAll('.action').forEach(button => { button.disabled = value || button.dataset.edge === 'true'; });
 }
 function showLogin() { if ($('#editor').open) $('#editor').close(); if ($('#invite-dialog').open) $('#invite-dialog').close(); if ($('#schedule-dialog').open) $('#schedule-dialog').close(); $('#initial-loading').hidden = true; $('#workspace').hidden = true; $('#login-screen').hidden = false; $('#password').value = ''; $('#login-form').hidden = !!invitationToken || !!resetToken; $('#accept-invitation-form').hidden = !invitationToken; $('#reset-request-form').hidden = true; $('#reset-confirm-form').hidden = !resetToken; }
 function showWorkspace() {
@@ -80,8 +81,8 @@ async function loadPosts(append = false) {
 }
 async function loadAccounts() {
   threadsConfigured = null; publishingEnabled = false; renderThreadsConnection();
-  try { const result = await api('/api/threads/accounts'); accounts = result.accounts; accountsAvailable = true; const config = await api('/api/threads/config'); threadsConfigured = config.configured === true; publishingEnabled = config.publishingEnabled === true; }
-  catch (error) { if (error.status === 401) throw error; accounts = []; accountsAvailable = false; threadsConfigured = 'error'; }
+  try { const result = await api('/api/threads/accounts'); accounts = result.accounts; threadsAttention = result.attention || []; accountsAvailable = true; const config = await api('/api/threads/config'); threadsConfigured = config.configured === true; publishingEnabled = config.publishingEnabled === true; }
+  catch (error) { if (error.status === 401) throw error; accounts = []; threadsAttention = []; accountsAvailable = false; threadsConfigured = 'error'; }
   finally { if (user) renderThreadsConnection(); }
 }
 function renderThreadsConnection() {
@@ -95,6 +96,7 @@ function renderThreadsConnection() {
   else if (threadsConfigured === null) message.textContent = 'Memeriksa koneksi Threads...';
   else if (threadsConfigured === 'error') message.textContent = 'Status koneksi tidak dapat diperiksa. Muat ulang halaman dan coba lagi.';
   else if (!threadsConfigured) message.textContent = 'Koneksi belum dikonfigurasi. Atur THREADS_APP_ID, THREADS_APP_SECRET, dan THREADS_TOKEN_KEY di server.';
+  else if (threadsAttention.length) message.textContent = `Akun yang perlu diperiksa: ${threadsAttention.map(account => `@${account.username} (${account.reason === 'retry' ? 'pembaruan token akan dicoba lagi' : 'hubungkan ulang'})`).join(', ')}.`;
   else message.hidden = true;
 }
 function render() {
@@ -108,13 +110,15 @@ function render() {
   for (const post of visible) {
     const row = $('#post-template').content.firstElementChild.cloneNode(true);
     row.querySelector('.post-text').textContent = post.body || (post.media_kind === 'VIDEO' ? 'Post video' : 'Post gambar');
-    if (post.media_id && ['IMAGE','VIDEO'].includes(post.media_kind)) {
-      const preview = document.createElement(post.media_kind === 'IMAGE' ? 'img' : 'video');
-      preview.src = `/api/media/${encodeURIComponent(post.media_id)}/content`; preview.width = 160; preview.height = 120; preview.className = 'media-preview';
-      if (post.media_kind === 'IMAGE') { preview.alt = 'Lampiran gambar'; preview.loading = 'lazy'; }
+    let mediaAnchor = row.querySelector('.post-text');
+    for (const item of post.media || (post.media_id ? [{id:post.media_id,kind:post.media_kind}] : [])) {
+      const preview = document.createElement(item.kind === 'IMAGE' ? 'img' : 'video');
+      preview.src = `/api/media/${encodeURIComponent(item.id)}/content`; preview.width = 160; preview.height = 120; preview.className = 'media-preview';
+      if (item.kind === 'IMAGE') { preview.alt = 'Lampiran gambar'; preview.loading = 'lazy'; }
       else { preview.controls = true; preview.preload = 'metadata'; }
-      row.querySelector('.post-text').after(preview);
+      mediaAnchor.after(preview); mediaAnchor = preview;
     }
+    for (const [index,reply] of (post.replies || []).entries()) { const line=document.createElement('p'); line.textContent=`Bagian ${index+2}: ${reply}`; mediaAnchor.after(line); mediaAnchor=line; }
     const created = new Date(post.created_at);
     row.querySelector('.post-created').textContent = `${Number.isNaN(created.getTime()) ? '' : `Dibuat ${new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(created)}`}${post.destination_username ? ` · @${post.destination_username}` : ''}`;
     const status = row.querySelector('.status'); status.textContent = statusLabels[post.status] || post.status; status.classList.add(post.status);
@@ -124,6 +128,7 @@ function render() {
       let when = '';
       try { if (post.scheduled_at && post.time_zone) when = ` · ${new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: post.time_zone }).format(new Date(post.scheduled_at))} (${post.time_zone})`; } catch { when = ''; }
       extra.textContent = jobLabels[post.job_status] + when; status.after(extra);
+      if (post.replies?.length && post.part_index != null) extra.textContent += ` · Bagian ${Math.min(post.part_index+1,post.replies.length+1)} dari ${post.replies.length+1}`;
       if (post.job_status === 'needs_action') {
         const reasons = { meta_auth: 'Meta menolak akses. Periksa izin dan hubungkan ulang akun Threads.', meta_rejected: 'Meta menolak konten atau permintaan. Periksa isi dan izin akun sebelum mencoba lagi.', meta_unavailable: 'Meta tidak dapat dihubungi atau membatasi permintaan. Coba kembali nanti.', preconditions: 'Persetujuan, akses pengguna, atau akun Threads tidak lagi tersedia. Periksa kembali sebelum mencoba.', token_unreadable: 'Token tidak dapat dibaca. Periksa kunci server atau hubungkan ulang akun.', deadline: 'Batas percobaan satu jam telah lewat. Periksa konten dan jadwalkan kembali.' };
         if (reasons[post.failure_code]) extra.textContent += ` · ${reasons[post.failure_code]}`;
@@ -131,7 +136,8 @@ function render() {
     }
     const actions = row.querySelector('.post-actions');
     const own = post.created_by === user.id;
-    const blocked = ['scheduled', 'preparing', 'prepared', 'publishing', 'published', 'confirmed_published', 'uncertain'].includes(post.job_status);
+    const partial = post.job_status === 'needs_action' && post.part_index > 0;
+    const blocked = partial || ['scheduled', 'preparing', 'prepared', 'publishing', 'published', 'confirmed_published', 'uncertain'].includes(post.job_status);
     const mayManage = own || user.role === 'admin' || user.role === 'reviewer';
     const mayPublish = user.emailVerified && mayManage;
     if (own && post.status !== 'submitted' && !blocked) addAction(actions, 'Ubah', () => openEditor(post));
@@ -144,7 +150,7 @@ function render() {
       addAction(actions, 'Jadwalkan', () => openSchedule(post));
       addAction(actions, 'Terbitkan sekarang', () => publishNow(post));
     }
-    if (post.job_status === 'scheduled' && mayManage) {
+    if (post.job_status === 'scheduled' && mayManage && !post.part_index) {
       if (publishingEnabled && mayPublish) addAction(actions, 'Ubah jadwal', () => openSchedule(post));
       addAction(actions, 'Batalkan jadwal', () => cancelSchedule(post));
     }
@@ -152,6 +158,7 @@ function render() {
       addAction(actions, 'Sudah terbit', () => resolvePublication(post, 'published'));
       addAction(actions, 'Tidak terbit', () => resolvePublication(post, 'not_published'));
     }
+    if (partial && mayPublish && publishingEnabled) addAction(actions, 'Lanjutkan rangkaian', () => resumePublication(post));
     list.append(row);
   }
 }
@@ -169,7 +176,8 @@ async function transition(post, action) {
 function openEditor(post = null) {
   if (busy) return;
   editing = post; $('#post-text').value = post?.body || ''; $('#editor-title').textContent = post ? 'Ubah draft' : 'Buat draft';
-  editorMedia = post?.media_id ? { id: post.media_id, kind: post.media_kind } : null; pendingMedia = null; uploadedMediaIds = new Set(); $('#post-media').value = ''; renderEditorMedia();
+  editorMedia = post?.media ? post.media.map(item => ({...item})) : post?.media_id ? [{ id: post.media_id, kind: post.media_kind }] : []; uploadedMediaIds = new Set(); $('#post-media').value = ''; renderEditorMedia();
+  renderReplies(post?.replies || []);
   const select = $('#post-account'); select.replaceChildren();
   const blank = document.createElement('option'); blank.value = ''; blank.textContent = 'Belum dipilih'; select.append(blank);
   for (const account of accounts) { const option = document.createElement('option'); option.value = account.id; option.textContent = `@${account.username}`; select.append(option); }
@@ -179,26 +187,60 @@ function openEditor(post = null) {
   $('#account-help').textContent = !accountsAvailable ? 'Daftar akun tidak dapat dimuat. Akun tujuan draft yang ada akan dipertahankan.' : accounts.length ? 'Pilih akun tujuan yang terhubung atau biarkan kosong.' : 'Belum ada akun Threads yang terhubung.';
   errorAt('#form-error', ''); $('#editor').showModal(); $('#post-text').focus();
 }
+function readReplies() { return [...$('#post-replies').querySelectorAll('textarea')].map(input => input.value); }
+function renderReplies(replies) {
+  const container=$('#post-replies'); container.replaceChildren();
+  replies.forEach((text,index) => {
+    const wrapper=document.createElement('div'), label=document.createElement('label'), input=document.createElement('textarea'), remove=document.createElement('button');
+    input.id=`reply-${index}`; input.rows=4; input.maxLength=1000; input.value=text; label.htmlFor=input.id; label.textContent=`Bagian ${index+2}`;
+    remove.type='button'; remove.className='action'; remove.textContent=`Hapus bagian ${index+2}`;
+    remove.addEventListener('click',() => { const next=readReplies(); next.splice(index,1); renderReplies(next); });
+    wrapper.append(label,input,remove); container.append(wrapper);
+  });
+}
+function splitPost() {
+  const characters=Array.from($('#post-text').value.trim()), current=readReplies();
+  if (characters.length <= 500) { errorAt('#form-error','Teks bagian pertama belum melebihi 500 karakter.'); return false; }
+  const chunks=[];
+  while (characters.length) { let cut=Math.min(450,characters.length); if (cut<characters.length) { const space=characters.slice(0,cut).lastIndexOf(' '); if (space>225) cut=space+1; } chunks.push(characters.splice(0,cut).join('').trim()); }
+  if (chunks.length+current.length>10) { errorAt('#form-error','Maksimal 10 bagian dalam satu rangkaian.'); return false; }
+  $('#post-text').value=chunks.shift(); renderReplies([...chunks,...current]); errorAt('#form-error','Teks telah dibagi. Periksa dan sesuaikan setiap bagian sebelum menyimpan.'); return true;
+}
+$('#split-post').addEventListener('click',splitPost);
+$('#add-reply').addEventListener('click',() => { const replies=readReplies(); if (replies.length>=9) { errorAt('#form-error','Maksimal 10 bagian dalam satu rangkaian.'); return; } renderReplies([...replies,'']); });
 function renderEditorMedia() {
-  if (previewObjectUrl) { URL.revokeObjectURL(previewObjectUrl); previewObjectUrl = null; }
+  for (const url of previewObjectUrls) URL.revokeObjectURL(url); previewObjectUrls = [];
   const container = $('#media-preview'); container.replaceChildren();
-  $('#remove-media').hidden = !editorMedia && !pendingMedia;
-  if (!editorMedia && !pendingMedia) return;
-  const kind = pendingMedia ? (pendingMedia.type === 'video/mp4' ? 'VIDEO' : 'IMAGE') : editorMedia.kind;
-  const element = document.createElement(kind === 'IMAGE' ? 'img' : 'video');
-  if (pendingMedia) { previewObjectUrl = URL.createObjectURL(pendingMedia); element.src = previewObjectUrl; }
-  else element.src = `/api/media/${encodeURIComponent(editorMedia.id)}/content`;
-  element.width = 320; element.height = 240; element.className = 'media-preview';
-  if (kind === 'IMAGE') element.alt = 'Pratinjau lampiran draft'; else { element.controls = true; element.preload = 'metadata'; }
-  container.append(element);
+  $('#remove-media').hidden = !editorMedia.length;
+  editorMedia.forEach((item,index) => {
+    const wrapper = document.createElement('div');
+    const element = document.createElement(item.kind === 'IMAGE' ? 'img' : 'video');
+    if (item.file) { const url = URL.createObjectURL(item.file); previewObjectUrls.push(url); element.src = url; }
+    else element.src = `/api/media/${encodeURIComponent(item.id)}/content`;
+    element.width = 160; element.height = 120; element.className = 'media-preview';
+    if (item.kind === 'IMAGE') element.alt = `Lampiran ${index+1}`; else { element.controls = true; element.preload = 'metadata'; }
+    wrapper.append(element);
+    if (editorMedia.length > 1) {
+      const label=document.createElement('span'); label.textContent=`Gambar ${index+1}`; wrapper.append(label);
+      for (const [text,offset] of [['Naik',-1],['Turun',1],['Hapus',0]]) {
+        const button=document.createElement('button'); button.type='button'; button.className='action'; button.textContent=`${text} gambar ${index+1}`;
+        button.dataset.edge=String((offset < 0 && index === 0) || (offset > 0 && index === editorMedia.length-1)); button.disabled=busy || button.dataset.edge === 'true';
+        button.addEventListener('click',() => { if (busy) return; if (!offset) editorMedia.splice(index,1); else [editorMedia[index],editorMedia[index+offset]]=[editorMedia[index+offset],editorMedia[index]]; renderEditorMedia(); });
+        wrapper.append(button);
+      }
+    }
+    container.append(wrapper);
+  });
 }
 $('#post-media').addEventListener('change', () => {
-  const file = $('#post-media').files[0];
-  if (!file) return;
-  if (!['image/jpeg','image/png','video/mp4'].includes(file.type) || file.size > (file.type === 'video/mp4' ? 100 : 8)*1024*1024) { errorAt('#form-error','Pilih JPEG/PNG maksimal 8 MiB atau MP4 maksimal 100 MiB.'); $('#post-media').value = ''; return; }
-  pendingMedia = file; renderEditorMedia(); errorAt('#form-error','');
+  const files = [...$('#post-media').files];
+  if (!files.length) return;
+  if (files.some(file => !['image/jpeg','image/png','video/mp4'].includes(file.type) || file.size > (file.type === 'video/mp4' ? 100 : 8)*1024*1024)) { errorAt('#form-error','Pilih JPEG/PNG maksimal 8 MiB atau MP4 maksimal 100 MiB.'); $('#post-media').value = ''; return; }
+  const incoming = files.map(file => ({file,kind:file.type === 'video/mp4' ? 'VIDEO' : 'IMAGE'}));
+  if (editorMedia.length + incoming.length > 10 || (editorMedia.length + incoming.length > 1 && [...editorMedia,...incoming].some(item => item.kind !== 'IMAGE'))) { errorAt('#form-error','Pilih maksimal 10 gambar, atau satu video tanpa gambar.'); $('#post-media').value = ''; return; }
+  editorMedia.push(...incoming); $('#post-media').value = ''; renderEditorMedia(); errorAt('#form-error','');
 });
-$('#remove-media').addEventListener('click', () => { pendingMedia = null; editorMedia = null; $('#post-media').value = ''; renderEditorMedia(); });
+$('#remove-media').addEventListener('click', () => { editorMedia = []; $('#post-media').value = ''; renderEditorMedia(); });
 async function closeEditor() {
   if (busy) return;
   setBusy(true);
@@ -215,7 +257,7 @@ async function cleanupUnusedMedia() {
   return success;
 }
 $('#editor').addEventListener('cancel', event => { event.preventDefault(); void closeEditor(); });
-$('#editor').addEventListener('close', () => { if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl); previewObjectUrl = null; });
+$('#editor').addEventListener('close', () => { for (const url of previewObjectUrls) URL.revokeObjectURL(url); previewObjectUrls = []; });
 function openSchedule(post) {
   scheduling = post; $('#schedule-form').reset();
   $('#schedule-title').textContent = post.job_status === 'scheduled' ? 'Ubah jadwal' : 'Jadwalkan posting';
@@ -239,9 +281,18 @@ async function cancelSchedule(post) {
 async function resolvePublication(post, decision) {
   const prompt = decision === 'published' ? 'Apakah kamu sudah memeriksa akun Threads dan memastikan posting ini sudah terbit?' : 'Apakah kamu sudah memeriksa akun Threads dan memastikan posting ini tidak terbit? Jika keliru, percobaan berikutnya dapat membuat posting ganda.';
   if (busy || !confirm(prompt)) return;
+  let publishedId;
+  if (decision === 'published' && post.replies?.length > post.part_index) { publishedId=window.prompt('Masukkan ID numerik posting Threads yang sudah terbit agar balasan berikutnya dapat dilanjutkan.'); if (publishedId === null) return; if (!/^[0-9]+$/.test(publishedId)) { errorAt('#workspace-error','ID posting harus berupa angka.'); return; } }
   setBusy(true); errorAt('#workspace-error', '');
-  try { await api(`/api/posts/${encodeURIComponent(post.id)}/schedules/${encodeURIComponent(post.job_id)}/resolve`, { method: 'POST', body: JSON.stringify({ revision: post.revision, decision, acknowledged: true }) }); await loadPosts(); }
+  try { await api(`/api/posts/${encodeURIComponent(post.id)}/schedules/${encodeURIComponent(post.job_id)}/resolve`, { method: 'POST', body: JSON.stringify({ revision: post.revision, decision, acknowledged: true, ...(publishedId ? {publishedId} : {}) }) }); await loadPosts(); }
   catch (error) { errorAt('#workspace-error', error.message); }
+  finally { setBusy(false); }
+}
+async function resumePublication(post) {
+  if (busy || !confirm('Lanjutkan dari bagian yang belum terbit? Bagian sebelumnya tidak akan dikirim ulang.')) return;
+  setBusy(true); errorAt('#workspace-error','');
+  try { await api(`/api/posts/${encodeURIComponent(post.id)}/schedules/${encodeURIComponent(post.job_id)}/resume`,{method:'POST',body:JSON.stringify({revision:post.revision})}); await loadPosts(); }
+  catch (error) { errorAt('#workspace-error',error.message); }
   finally { setBusy(false); }
 }
 $('#schedule-form').addEventListener('submit', async event => {
@@ -356,18 +407,23 @@ $('#accept-invitation-form').addEventListener('submit', async event => {
 $('#post-form').addEventListener('submit', async event => {
   event.preventDefault(); if (busy) return;
   const body = $('#post-text').value.trim();
-  if (!body && !editorMedia && !pendingMedia) { errorAt('#form-error', 'Isi teks atau lampirkan media.'); return; }
+  if (Array.from(body).length>500) { splitPost(); return; }
+  const replies=readReplies();
+  if (replies.some(reply => !reply.trim() || Array.from(reply).length>500)) { errorAt('#form-error','Isi setiap bagian dengan maksimal 500 karakter.'); return; }
+  if (!body && !editorMedia.length) { errorAt('#form-error', 'Isi teks atau lampirkan media.'); return; }
   setBusy(true); errorAt('#form-error', '');
   try {
-    if (pendingMedia) {
-      const form = new FormData(); form.append('file',pendingMedia);
-      editorMedia = (await api('/api/media',{ method: 'POST', body: form })).media; uploadedMediaIds.add(editorMedia.id); pendingMedia = null; $('#post-media').value = ''; renderEditorMedia();
+    for (let i=0; i<editorMedia.length; i++) if (editorMedia[i].file) {
+      const form = new FormData(); form.append('file',editorMedia[i].file);
+      editorMedia[i] = (await api('/api/media',{ method: 'POST', body: form })).media; uploadedMediaIds.add(editorMedia[i].id); renderEditorMedia();
     }
     const payload = editing ? { body, revision: editing.revision } : { body };
-    payload.mediaId = editorMedia?.id ?? null;
+    payload.replies = replies;
+    if (editorMedia.length <= 1) payload.mediaId = editorMedia[0]?.id ?? null;
+    else payload.mediaIds = editorMedia.map(item => item.id);
     if (accountsAvailable) payload.destinationAccountId = $('#post-account').value || null;
     await api(editing ? `/api/posts/${encodeURIComponent(editing.id)}` : '/api/posts', { method: editing ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-    if (editorMedia) uploadedMediaIds.delete(editorMedia.id);
+    for (const item of editorMedia) uploadedMediaIds.delete(item.id);
     const cleaned = await cleanupUnusedMedia();
     $('#editor').close(); await loadPosts();
     if (!cleaned) errorAt('#workspace-error', 'Sebagian unggahan belum dapat dibersihkan dari penyimpanan.');

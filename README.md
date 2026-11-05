@@ -1,6 +1,6 @@
 # Threads Automation
 
-Proyek aplikasi internal untuk pengelolaan dan penjadwalan konten Threads. Aplikasi utama menyediakan login, draft teks dengan satu gambar atau video, persetujuan, serta penjadwalan dan penerbitan untuk pengujian terbatas.
+Proyek aplikasi internal untuk pengelolaan dan penjadwalan konten Threads. Aplikasi utama menyediakan login, draft, carousel gambar, rangkaian balasan, persetujuan, serta penjadwalan dan penerbitan untuk pengujian terbatas.
 
 Yang tersedia: antarmuka utama, login lokal, database, lampiran media, draft, dan persetujuan. Aplikasi utama terpisah dari demo; data keduanya tidak digabungkan.
 
@@ -21,7 +21,7 @@ Mode ini menjalankan PostgreSQL berbasis WASM lokal dan menyimpan data di `.loca
 
 Jalankan `npm run demo`, lalu buka `http://127.0.0.1:4173`. Demo hanya menggunakan Node.js dan penyimpanan lokal browser; tidak memerlukan database atau akun. Demo menyediakan alur draft, pengajuan, persetujuan, filter, dan jadwal simulasi. Tidak ada login, sinkronisasi tim, koneksi Threads, notifikasi, atau publikasi otomatis. Menghapus data situs di browser akan menghapus data demo. Untuk menggunakan port lain, atur environment variable `DEMO_PORT` sebelum menjalankan server.
 
-Pengguna melaporkan koneksi OAuth berhasil dengan akun Threads Tester. Publikasi media baru diuji dengan respons Meta simulasi dan belum diuji melalui Meta sungguhan. Belum tersedia: pengelolaan anggota setelah bergabung, pembaruan otomatis token Threads, Google Sign-In, GoWhatsapp, serta akses API untuk integrasi mesin. Draft membutuhkan teks atau satu lampiran. Undangan dan verifikasi email tersedia jika SMTP dikonfigurasi; hasil pengujian SMTP nyata belum didokumentasikan. Jangan gunakan untuk produksi.
+Pengguna melaporkan koneksi OAuth dan penerbitan satu gambar berhasil dengan akun Threads Tester. Carousel, rangkaian balasan dan refresh token baru diuji dengan respons Meta simulasi. Belum tersedia: pengelolaan anggota setelah bergabung, Google Sign-In, GoWhatsapp, serta akses API untuk integrasi mesin. Draft membutuhkan teks atau lampiran. Undangan dan verifikasi email tersedia jika SMTP dikonfigurasi; hasil pengujian SMTP nyata belum didokumentasikan. Hardening, backup dan pemantauan produksi masih diperlukan.
 
 ## Pengembangan lokal
 
@@ -67,11 +67,13 @@ Klik tombol akan memeriksa ulang akun dan konfigurasi terbaru. Jika email baru d
 
 ## Penjadwalan dan penerbitan
 
-Penerbitan, termasuk media, baru diuji dengan respons Meta simulasi dan PostgreSQL berbasis WASM; belum diuji end-to-end dengan Meta, Docker, atau server PostgreSQL sungguhan. Worker dinonaktifkan secara default, termasuk pada `npm run local`. Setelah mengonfigurasi OAuth, SMTP, HTTPS dan migrasi, operator dapat mengaktifkannya di lingkungan pengujian dengan `PUBLISH_WORKER_ENABLED=true` dan memulai ulang aplikasi. Pastikan konfigurasi Threads lengkap; tombol penjadwalan tidak tersedia saat worker dinonaktifkan. Pengaktifan worker akan memproses pekerjaan yang jatuh tempo.
+Pengguna mengonfirmasi penerbitan satu gambar melalui Meta berhasil. Carousel, rangkaian dan refresh token belum diuji end-to-end dengan Meta, Docker, atau server PostgreSQL sungguhan. Worker publikasi dinonaktifkan secara default, termasuk pada `npm run local`. Setelah mengonfigurasi OAuth, SMTP, HTTPS dan migrasi, operator dapat mengaktifkannya dengan `PUBLISH_WORKER_ENABLED=true` dan memulai ulang aplikasi. Pengaktifan worker akan memproses pekerjaan yang jatuh tempo.
 
 Admin menghubungkan akun Threads. Anggota membuat draft teks dan mengajukannya; admin atau reviewer menyetujui. Pembuat draft, admin, atau reviewer dapat menjadwalkan, mengubah waktu, membatalkan sebelum diproses, atau menerbitkan sekarang. Waktu disimpan dalam UTC bersama zona waktu yang dipilih; mengubah waktu saja tidak membatalkan persetujuan. Token yang akan kedaluwarsa sebelum jadwal harus dihubungkan ulang.
 
-Worker mencatat percobaan dan hanya mencoba ulang kegagalan sementara yang aman sebelum tahap publikasi, dengan jeda bertambah dan tenggat satu jam. Untuk media, worker memeriksa status kontainer sampai siap; status sudah terbit tetapi tidak dikenali menjadi hasil belum pasti. Jika hasil pengiriman ke Meta tidak dapat dipastikan, periksa akun Threads secara manual sebelum menandai hasilnya; aplikasi tidak otomatis mengirim ulang karena dapat membuat duplikat. Hasil konfirmasi manual dicatat. Pembaruan token otomatis, validasi seluruh batas konten Meta sebelum pengiriman, dan pengujian Meta nyata masih diperlukan.
+Worker mencatat percobaan dan hanya mencoba ulang kegagalan sementara yang aman sebelum tahap publikasi, dengan jeda bertambah dan tenggat satu jam. Untuk media, worker memeriksa status kontainer sampai siap. Jika hasil pengiriman ke Meta tidak dapat dipastikan, periksa Threads secara manual; aplikasi tidak otomatis mengirim ulang. Pada rangkaian, bagian yang sudah terbit tidak diulang. Jika bagian yang hasilnya belum pasti dinyatakan terbit dan masih ada balasan, masukkan ID numerik bagian tersebut; server mencoba memverifikasi akun, isi, dan target balasan dengan Meta sebelum melanjutkan. Verifikasi memeriksa hingga 50 posting/balasan terbaru dan dapat memerlukan izin Meta; jika gagal, rangkaian tetap berhenti. Tindakan **Lanjutkan rangkaian** secara eksplisit memulai jendela percobaan satu jam yang baru.
+
+Jika konfigurasi Threads tersedia, proses aplikasi memeriksa token secara otomatis setiap 15 menit. Token yang masih berlaku dan berjarak maksimal 14 hari dari kedaluwarsa diperbarui, dengan jeda dan percobaan ulang untuk gangguan sementara. Jika Meta menolak token, atau token terlanjur kedaluwarsa, admin perlu menghubungkan ulang akun. Jadwal baru masih dibatasi sebelum waktu kedaluwarsa token yang saat ini tersimpan; penjadwalan tidak mengasumsikan refresh pasti berhasil.
 
 Untuk instalasi Compose yang sudah ada, backup database dan volume media terlebih dahulu. Tunggu sampai tidak ada publikasi yang sedang diproses, lalu hentikan semua instance aplikasi lama agar worker lama tidak mengambil pekerjaan bermedia. Ambil kode baru dan jalankan:
 
@@ -88,7 +90,7 @@ Aktifkan worker dengan `PUBLISH_WORKER_ENABLED=true` di `.env` hanya saat siap m
 
 Compose menyimpan media dalam named volume `media`, terpisah dari volume database. Backup dan pulihkan keduanya bersama-sama; menghapus volume akan menghapus lampiran. Di luar Compose, `MEDIA_DIR` memilih direktori penyimpanan (default `.local-media`); `npm run local` memakai direktori media di bawah `.local-data`. Pastikan direktori dimiliki pengguna aplikasi dan tersedia ruang disk yang cukup.
 
-Satu draft dapat berisi teks, satu gambar, atau satu video. Gambar JPEG/PNG maksimal 8 MiB dinormalisasi menjadi JPEG, diputar sesuai orientasi dan diperkecil hingga 1440 piksel per sisi; transparansi diratakan ke putih. Video dibatasi 100 MiB, MP4 H.264, 3–300 detik, 23–60 fps, maksimal 1920 piksel per sisi, dengan maksimal satu audio AAC 48 kHz. Ini adalah batas aplikasi untuk pengujian; Meta tetap memeriksa persyaratan format lainnya. Mengubah atau menghapus lampiran membuat versi baru yang perlu disetujui kembali.
+Satu draft dapat berisi teks, hingga sepuluh gambar, atau satu video. Dua atau lebih gambar membentuk carousel; urutan dapat diubah. Rangkaian berisi maksimal sepuluh bagian dengan masing-masing maksimal 500 karakter; media berada pada bagian pertama. Gambar JPEG/PNG maksimal 8 MiB dinormalisasi menjadi JPEG, diputar sesuai orientasi dan diperkecil hingga 1440 piksel per sisi; transparansi diratakan ke putih. Video dibatasi 100 MiB, MP4 H.264, 3–300 detik, 23–60 fps, maksimal 1920 piksel per sisi, dengan maksimal satu audio AAC 48 kHz. Ini adalah batas aplikasi untuk pengujian; Meta tetap memeriksa persyaratan format lainnya. Mengubah konten atau lampiran membuat versi baru yang perlu disetujui kembali.
 
 Unggahan yang belum terikat versi hanya dapat dilihat/dihapus pengunggah; seluruh anggota tim dapat melihat lampiran yang sudah terikat ke versi konten. Berkas versi lama dipertahankan. Kapasitas metadata media dibatasi 20 GB; berkas sementara dan sisa akibat proses terhenti tidak dihitung dalam kuota tersebut, sehingga ruang disk tetap harus dipantau. Penghapusan otomatis berkas yatim, kebijakan retensi terperinci, dan backup/restore teruji belum tersedia.
 

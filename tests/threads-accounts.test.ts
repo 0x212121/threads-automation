@@ -8,7 +8,7 @@ import { ThreadsAccounts } from '../src/threads-accounts.js';
 
 test('token terenkripsi terikat pada akun dan hanya admin terverifikasi dapat menyimpan', async () => {
   const db = new PGlite();
-  for (const name of ['001_content.sql', '002_local_identity.sql', '007_threads_accounts.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
+  for (const name of ['001_content.sql', '002_local_identity.sql', '007_threads_accounts.sql', '013_token_refresh.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
   const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.affectedRows ?? result.rows.length }; };
   const pool = { connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
   const admin = '11111111-1111-4111-8111-111111111111', editor = '22222222-2222-4222-8222-222222222222';

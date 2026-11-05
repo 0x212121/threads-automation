@@ -43,7 +43,9 @@ Status awal: perencanaan. Kotak belum dicentang bukan klaim bahwa pekerjaan suda
 - [x] Tampilkan subkode/kategori Meta yang aman agar penolakan tester/App Review, izin, dan kredensial dapat dibedakan tanpa membuka pesan mentah. Uji kategori dari respons simulasi dan tidak bocornya secret.
 - [x] Pengguna melaporkan koneksi OAuth berhasil setelah akun Threads diundang dan menerima peran tester. Pengujian izin secara menyeluruh dan publikasi Meta nyata masih perlu dicatat.
 - [x] Tambahkan satu lampiran gambar/video, pratinjau, volume Docker persisten, URL HTTPS bertanda tangan, validasi sisi server, versi media dan polling kontainer. Uji Meta, Docker dan PostgreSQL sungguhan, backup/restore serta pembersihan berkas yatim masih diperlukan.
-- [ ] Lengkapi koneksi Threads dengan refresh token otomatis, pemeriksaan izin, dan pemutusan akun.
+- [x] Tambahkan refresh token otomatis dan status koneksi yang memerlukan tindakan; uji menggunakan respons Meta simulasi. Uji dengan token nyata masih diperlukan.
+- [ ] Lengkapi koneksi Threads dengan pemeriksaan izin dan pemutusan akun.
+- [x] Tambahkan carousel gambar dan rangkaian balasan dengan pemecahan otomatis, versi konten, serta penanganan hasil sebagian. Pengujian Meta sungguhan untuk kedua fitur masih diperlukan.
 - [ ] Lengkapi validasi media/teks terhadap semua batas Meta, tampilan riwayat versi, retensi dan pembersihan berkas yatim.
 - [ ] Validasi kebijakan persetujuan dan pembatalannya terhadap seluruh alur UI, API dan kondisi bersamaan.
 

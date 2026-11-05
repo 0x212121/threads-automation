@@ -15,7 +15,7 @@ import { ThreadsPublisher } from '../src/threads-publisher.js';
 
 test('API menjadwalkan draft yang disetujui, memeriksa CSRF dan membatalkan sebelum diklaim', async () => {
   const db = new PGlite();
-  for (const name of ['001_content.sql','002_local_identity.sql','006_password_reset.sql','007_threads_accounts.sql','009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','010_publication_resolutions.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
+  for (const name of ['001_content.sql','002_local_identity.sql','006_password_reset.sql','007_threads_accounts.sql','013_token_refresh.sql','009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','010_publication_resolutions.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
   const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.rows.length }; };
   const pool = { query, connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
   const user='11111111-1111-4111-8111-111111111111', hash = await hashPassword('kata sandi untuk pengujian');

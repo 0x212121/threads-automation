@@ -7,6 +7,7 @@ import { ThreadsOAuthClient } from './threads-oauth-client.js';
 import { TokenVault } from './token-vault.js';
 import { startPublicationWorker } from './publication-worker.js';
 import { MediaStore } from './media-store.js';
+import { startTokenRefreshWorker } from './threads-token-refresh.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl && !process.env.PGHOST) throw new Error('DATABASE_URL atau PGHOST wajib diatur.');
@@ -42,8 +43,9 @@ const port = Number(process.env.PORT ?? 3000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT tidak valid.');
 const server = app.listen(port, process.env.LOCAL_PGLITE === '1' ? '127.0.0.1' : '0.0.0.0', () => console.log(`Service listening on ${port}`));
 const stopWorker = publishingEnabled && threads ? startPublicationWorker(pool, threads.vault,{ store: media, origin }) : () => {};
+const stopRefreshWorker = threads ? startTokenRefreshWorker(pool, threads.vault) : () => {};
 async function stop() {
-  stopWorker(); server.close(async () => { await pool.end(); process.exit(0); });
+  stopWorker(); stopRefreshWorker(); server.close(async () => { await pool.end(); process.exit(0); });
 }
 process.on('SIGTERM', stop);
 process.on('SIGINT', stop);

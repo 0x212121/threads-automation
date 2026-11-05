@@ -7,7 +7,7 @@ import { PublicationRequests } from '../src/publication-requests.js';
 
 test('jadwal hanya oleh pembuat, reviewer, atau admin dan perubahan waktu menjaga persetujuan', async () => {
   const db = new PGlite();
-  for (const name of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','010_publication_resolutions.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
+  for (const name of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','013_token_refresh.sql','009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','010_publication_resolutions.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
   const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.rows.length }; };
   const pool = { connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
   const owner='11111111-1111-4111-8111-111111111111', other='22222222-2222-4222-8222-222222222222', reviewer='33333333-3333-4333-8333-333333333333', account='44444444-4444-4444-8444-444444444444', post='55555555-5555-4555-8555-555555555555';

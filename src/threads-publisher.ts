@@ -7,9 +7,10 @@ export class PublicationUncertainError extends Error {}
 export class ThreadsPublisher {
   constructor(private readonly request: typeof fetch = fetch) {}
 
-  async createTextContainer(token: string, text: string): Promise<string> {
+  async createTextContainer(token: string, text: string, replyTo?: string | null): Promise<string> {
     if (!text.trim()) throw new ContainerCreationError('Konten tidak valid.');
-    return this.create(token,{ media_type: 'TEXT', text });
+    if (replyTo && !/^[0-9]+$/.test(replyTo)) throw new ContainerCreationError('ID balasan tidak valid.');
+    return this.create(token,{ media_type: 'TEXT', text, ...(replyTo ? { reply_to_id: replyTo } : {}) });
   }
   async createMediaContainer(token: string, text: string, kind: 'IMAGE' | 'VIDEO', mediaUrl: string): Promise<string> {
     const source = new URL(mediaUrl);
@@ -17,6 +18,15 @@ export class ThreadsPublisher {
     const params: Record<string,string> = { media_type: kind, [kind === 'IMAGE' ? 'image_url' : 'video_url']: mediaUrl };
     if (text.trim()) params.text = text;
     return this.create(token,params);
+  }
+  async createCarouselItem(token: string, mediaUrl: string): Promise<string> {
+    const source = new URL(mediaUrl);
+    if (source.protocol !== 'https:' || source.username || source.password) throw new ContainerCreationError('URL media harus HTTPS.');
+    return this.create(token,{ media_type:'IMAGE', image_url:mediaUrl, is_carousel_item:'true' });
+  }
+  async createCarouselContainer(token: string, text: string, children: string[]): Promise<string> {
+    if (children.length < 2 || children.length > 10 || children.some(id => !/^[0-9]+$/.test(id))) throw new ContainerCreationError('Carousel tidak valid.');
+    return this.create(token,{ media_type:'CAROUSEL', children:children.join(','), ...(text.trim() ? { text } : {}) });
   }
   private async create(token: string, params: Record<string,string>): Promise<string> {
     if (!token) throw new ContainerCreationError('Token tidak valid.');

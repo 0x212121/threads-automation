@@ -648,6 +648,8 @@
                     "description": "Boleh kosong jika mediaId diisi."
                   },
                   "mediaId": { "type": ["string", "null"], "format": "uuid", "description": "Unggahan milik pembuat draft." },
+                  "mediaIds": { "type": "array", "maxItems": 10, "uniqueItems": true, "items": { "type": "string", "format": "uuid" }, "description": "Lampiran berurutan milik pembuat; beberapa lampiran hanya gambar. Jangan kirim bersama mediaId." },
+                  "replies": { "type": "array", "maxItems": 9, "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "description": "Bagian lanjutan berurutan; media hanya pada bagian pertama." },
                   "destinationAccountId": {
                     "type": [
                       "string",
@@ -715,6 +717,8 @@
                     "description": "Boleh kosong jika versi memiliki media."
                   },
                   "mediaId": { "type": ["string", "null"], "format": "uuid", "description": "Jika dihilangkan lampiran dipertahankan; null menghapus lampiran pada versi baru." },
+                  "mediaIds": { "type": "array", "maxItems": 10, "uniqueItems": true, "items": { "type": "string", "format": "uuid" }, "description": "Ganti lampiran berurutan; array kosong menghapus semua. Jangan kirim bersama mediaId." },
+                  "replies": { "type": "array", "maxItems": 9, "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "description": "Jika tidak dikirim, bagian lanjutan dipertahankan." },
                   "revision": {
                     "type": "integer",
                     "minimum": 1
@@ -843,6 +847,7 @@
                     "accounts"
                   ],
                   "properties": {
+                    "attention": { "type": "array", "items": { "type": "object", "required": ["username", "reason"], "properties": { "username": { "type": "string" }, "reason": { "type": "string", "enum": ["retry", "reconnect", "expired"] } } } },
                     "accounts": {
                       "type": "array",
                       "items": {
@@ -1340,6 +1345,21 @@
         }
       }
     },
+    "/api/posts/{id}/schedules/{jobId}/resume": {
+      "post": {
+        "operationId": "resumePartialThread",
+        "description": "Lanjutkan secara eksplisit dari bagian yang belum diterbitkan; tidak mengulang bagian yang sudah terbit. Mengawali jendela percobaan satu jam baru.",
+        "security": [{ "session": [] }],
+        "parameters": [
+          { "$ref": "#/components/parameters/PostId" },
+          { "$ref": "#/components/parameters/Origin" },
+          { "$ref": "#/components/parameters/CsrfToken" },
+          { "name": "jobId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "additionalProperties": false, "required": ["revision"], "properties": { "revision": { "type": "integer", "minimum": 1 } } } } } },
+        "responses": { "200": { "description": "Rangkaian dilanjutkan" }, "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" }, "403": { "$ref": "#/components/responses/Error" }, "409": { "$ref": "#/components/responses/Error" }, "503": { "$ref": "#/components/responses/Error" } }
+      }
+    },
     "/api/posts/{id}/schedules/{jobId}/resolve": {
       "post": {
         "operationId": "resolveUncertainPublication",
@@ -1393,6 +1413,7 @@
                       "not_published"
                     ]
                   },
+                  "publishedId": { "type": "string", "pattern": "^[0-9]{1,30}$", "description": "ID numerik diperlukan jika bagian terkonfirmasi terbit masih memiliki balasan; server memverifikasi akun, isi dan target balasan melalui Meta." },
                   "acknowledged": {
                     "type": "boolean",
                     "const": true
@@ -1547,6 +1568,9 @@
               },
               "media_id": { "type": ["string", "null"], "format": "uuid" },
               "media_kind": { "type": ["string", "null"], "enum": ["IMAGE", "VIDEO", null] },
+              "media": { "type": "array", "maxItems": 10, "items": { "type": "object", "required": ["id", "kind"], "properties": { "id": { "type": "string", "format": "uuid" }, "kind": { "type": "string", "enum": ["IMAGE", "VIDEO"] } } } },
+              "replies": { "type": "array", "maxItems": 9, "items": { "type": "string" } },
+              "part_index": { "type": ["integer", "null"], "minimum": 0, "maximum": 9 },
               "created_by": {
                 "type": "string",
                 "format": "uuid"

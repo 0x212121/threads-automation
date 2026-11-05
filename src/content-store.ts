@@ -5,8 +5,8 @@ import { DomainError, nextContentStatus, type ContentStatus, type Role } from '.
 type Actor = { id: string; role: Role };
 type Post = { id: string; status: ContentStatus; current_version: number; revision: number };
 type LockedPost = Post & { created_by: string; destination_account_id: string | null; media_id: string | null };
-type Content = { body: string; destinationAccountId: string | null; mediaId?: string | null };
-type ContentEdit = { body: string; destinationAccountId?: string | null; mediaId?: string | null };
+type Content = { body: string; destinationAccountId: string | null; mediaId?: string | null; mediaIds?: string[]; replies?: string[] };
+type ContentEdit = { body: string; destinationAccountId?: string | null; mediaId?: string | null; mediaIds?: string[]; replies?: string[] };
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export class PermissionError extends Error {}
 
@@ -16,6 +16,8 @@ function validateActor(actor: Actor) {
 function validateContent(content: ContentEdit) {
   if (typeof content.body !== 'string' || content.body.length > 5000) throw new DomainError('Isi konten tidak valid.');
   if (content.mediaId != null && !uuidPattern.test(content.mediaId)) throw new DomainError('Media tidak valid.');
+  if (content.mediaIds !== undefined && (!Array.isArray(content.mediaIds) || content.mediaIds.length > 10 || content.mediaIds.some(id => typeof id !== 'string' || !uuidPattern.test(id)) || new Set(content.mediaIds).size !== content.mediaIds.length || content.mediaId !== undefined)) throw new DomainError('Daftar media tidak valid.');
+  if (content.replies !== undefined && (!Array.isArray(content.replies) || content.replies.length > 9 || content.replies.some(reply => typeof reply !== 'string' || !reply.trim() || Array.from(reply).length > 500) || (content.replies.length > 0 && Array.from(content.body).length > 500))) throw new DomainError('Bagian rangkaian tidak valid atau melebihi 500 karakter.');
   if (content.destinationAccountId != null && !uuidPattern.test(content.destinationAccountId)) throw new DomainError('Akun tujuan tidak valid.');
 }
 
@@ -40,10 +42,13 @@ export class ContentStore {
     validateActor(actor); validateContent(content);
     return this.transaction(async client => {
       await this.checkAccount(client, content.destinationAccountId);
-      await this.checkMedia(client, content.mediaId ?? null, actor.id, content.body);
+      const media = content.mediaIds ?? (content.mediaId ? [content.mediaId] : []);
+      await this.checkMedia(client, media, actor.id, content.body);
       const id = randomUUID();
       const result = await client.query<Post>("INSERT INTO content_posts (id, created_by, status, current_version) VALUES ($1, $2, 'draft', 1) RETURNING id, status, current_version, revision", [id, actor.id]);
-      await client.query('INSERT INTO content_versions (post_id, version, body, destination_account_id, created_by, media_id) VALUES ($1, 1, $2, $3, $4, $5)', [id, content.body.trim(), content.destinationAccountId, actor.id, content.mediaId ?? null]);
+      await client.query('INSERT INTO content_versions (post_id, version, body, destination_account_id, created_by, media_id) VALUES ($1, 1, $2, $3, $4, $5)', [id, content.body.trim(), content.destinationAccountId, actor.id, media[0] ?? null]);
+      await this.saveMedia(client,id,1,media);
+      await this.saveReplies(client,id,1,content.replies ?? []);
       return result.rows[0]!;
     });
   }
@@ -55,12 +60,18 @@ export class ContentStore {
       if (post.created_by !== actor.id) throw new PermissionError('Tidak memiliki akses untuk mengubah konten ini.');
       await this.ensureNoPublication(client, id);
       const destination = content.destinationAccountId === undefined ? post.destination_account_id : content.destinationAccountId;
-      const media = content.mediaId === undefined ? post.media_id : content.mediaId;
+      const existing = await client.query<{media_id: string}>('SELECT media_id FROM content_version_media WHERE post_id=$1 AND version=$2 ORDER BY position',[id,post.current_version]);
+      const existingReplies = await client.query<{body: string}>('SELECT body FROM content_version_replies WHERE post_id=$1 AND version=$2 ORDER BY position',[id,post.current_version]);
+      const replies = content.replies ?? existingReplies.rows.map(row => row.body);
+      validateContent({ ...content, replies });
+      const media = content.mediaIds ?? (content.mediaId === undefined ? existing.rows.map(row => row.media_id) : content.mediaId ? [content.mediaId] : []);
       await this.checkMedia(client, media, actor.id, content.body);
       await this.checkAccount(client, destination);
       const status = nextContentStatus(post.status, 'edit', actor.role);
       const version = post.current_version + 1;
-      await client.query('INSERT INTO content_versions (post_id, version, body, destination_account_id, created_by, media_id) VALUES ($1, $2, $3, $4, $5, $6)', [id, version, content.body.trim(), destination, actor.id, media]);
+      await client.query('INSERT INTO content_versions (post_id, version, body, destination_account_id, created_by, media_id) VALUES ($1, $2, $3, $4, $5, $6)', [id, version, content.body.trim(), destination, actor.id, media[0] ?? null]);
+      await this.saveMedia(client,id,version,media);
+      await this.saveReplies(client,id,version,replies);
       const result = await client.query<Post>('UPDATE content_posts SET current_version=$2, status=$3, revision=revision+1, updated_at=now() WHERE id=$1 RETURNING id, status, current_version, revision', [id, version, status]);
       return result.rows[0]!;
     });
@@ -95,14 +106,22 @@ export class ContentStore {
     const result = await client.query("SELECT id FROM threads_accounts WHERE id=$1 AND status='active' AND token_expires_at > now() FOR SHARE", [id]);
     if (!result.rows[0]) throw new DomainError('Akun Threads tidak tersedia atau perlu otorisasi ulang.');
   }
-  private async checkMedia(client: PoolClient, id: string | null, userId: string, body: string) {
-    if (!body.trim() && !id) throw new DomainError('Isi teks atau lampirkan media.');
-    if (!id) return;
-    const result = await client.query('SELECT id FROM media_assets WHERE id=$1 AND uploaded_by=$2 FOR SHARE', [id,userId]);
-    if (!result.rows[0]) throw new DomainError('Media tidak ditemukan atau bukan milik pembuat draft.');
+  private async checkMedia(client: PoolClient, ids: string[], userId: string, body: string) {
+    if (!body.trim() && !ids.length) throw new DomainError('Isi teks atau lampirkan media.');
+    for (const id of [...ids].sort()) {
+      const result = await client.query<{kind: string}>('SELECT kind FROM media_assets WHERE id=$1 AND uploaded_by=$2 FOR SHARE', [id,userId]);
+      if (!result.rows[0]) throw new DomainError('Media tidak ditemukan atau bukan milik pembuat draft.');
+      if (ids.length > 1 && result.rows[0].kind !== 'IMAGE') throw new DomainError('Carousel hanya mendukung gambar.');
+    }
+  }
+  private async saveMedia(client: PoolClient, postId: string, version: number, ids: string[]) {
+    for (let position=0; position<ids.length; position++) await client.query('INSERT INTO content_version_media(post_id,version,position,media_id) VALUES ($1,$2,$3,$4)',[postId,version,position,ids[position]]);
+  }
+  private async saveReplies(client: PoolClient, postId: string, version: number, replies: string[]) {
+    for (let position=0; position<replies.length; position++) await client.query('INSERT INTO content_version_replies(post_id,version,position,body) VALUES ($1,$2,$3,$4)',[postId,version,position+1,replies[position]!.trim()]);
   }
   private async ensureNoPublication(client: PoolClient, id: string): Promise<void> {
-    const result = await client.query("SELECT id FROM publication_jobs WHERE post_id=$1 AND status IN ('scheduled','preparing','prepared','publishing','published','confirmed_published','uncertain') LIMIT 1", [id]);
+    const result = await client.query("SELECT j.id FROM publication_jobs j WHERE j.post_id=$1 AND (j.status IN ('scheduled','preparing','prepared','publishing','published','confirmed_published','uncertain') OR EXISTS (SELECT 1 FROM publication_parts pp WHERE pp.job_id=j.id AND pp.status='published')) LIMIT 1", [id]);
     if (result.rows[0]) throw new DomainError('Konten memiliki publikasi aktif atau hasil yang belum pasti.');
   }
 }

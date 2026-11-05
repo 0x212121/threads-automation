@@ -14,9 +14,27 @@ export async function processPublication(queue: PublicationQueue, vault: TokenVa
   try { token = vault.open({ ciphertext: payload.encrypted_token, iv: payload.token_iv, tag: payload.token_tag }, `${job.account_id}:${payload.threads_user_id}`); }
   catch { await queue.needsAction(job.id, job.lease_token, 'token_unreadable'); return true; }
   let container = job.container_id;
+  const assets = await queue.media(job.id,job.lease_token);
   if (job.status === 'preparing') {
     if (payload.media_id && (!media || !payload.media_kind)) { await queue.needsAction(job.id,job.lease_token); return true; }
-    try { container = payload.media_id && payload.media_kind && media ? await publisher.createMediaContainer(token,payload.body,payload.media_kind,media.store.downloadUrl(media.origin,job.id,payload.media_id)) : await publisher.createTextContainer(token, payload.body); }
+    try {
+      if (assets.length > 1 && media) {
+        const children: string[] = [];
+        for (const asset of assets) {
+          if (asset.kind !== 'IMAGE') { await queue.needsAction(job.id,job.lease_token); return true; }
+          let child = asset.container_id;
+          if (!child) {
+            child = await publisher.createCarouselItem(token,media.store.downloadUrl(media.origin,job.id,asset.media_id));
+            if (!await queue.saveCarouselItem(job.id,job.lease_token,asset.position,asset.media_id,child)) return true;
+          }
+          const status = await publisher.containerStatus(token,child);
+          if (status === 'IN_PROGRESS') { await queue.deferPreparing(job.id,job.lease_token); return true; }
+          if (status !== 'FINISHED') { await queue.needsAction(job.id,job.lease_token,'meta_rejected'); return true; }
+          children.push(child);
+        }
+        container = await publisher.createCarouselContainer(token,payload.body,children);
+      } else container = payload.media_id && payload.media_kind && media ? await publisher.createMediaContainer(token,payload.body,payload.media_kind,media.store.downloadUrl(media.origin,job.id,payload.media_id)) : await publisher.createTextContainer(token, payload.body, job.reply_to_id);
+    }
     catch (error) { await queue.preparationFailed(job.id, job.lease_token, error instanceof ContainerCreationError && error.retryable, error instanceof ContainerCreationError ? error.reason : 'meta_rejected'); return true; }
     if (!await queue.markPrepared(job.id, job.lease_token, container)) return true;
   }

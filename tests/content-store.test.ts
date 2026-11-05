@@ -12,6 +12,8 @@ test('konten, versi dan persetujuan tersimpan secara transaksional', async () =>
   await db.exec(await readFile('db/migrations/007_threads_accounts.sql', 'utf8'));
   await db.exec(await readFile('db/migrations/009_publication_jobs.sql', 'utf8'));
   await db.exec(await readFile('db/migrations/012_media.sql', 'utf8'));
+  await db.exec(await readFile('db/migrations/014_carousel.sql', 'utf8'));
+  await db.exec(await readFile('db/migrations/015_thread_replies.sql', 'utf8'));
   const client = { query: (text: string, params?: unknown[]) => db.query(text, params), release: () => {} };
   const pool = { connect: async () => client } as unknown as Pool;
   const store = new ContentStore(pool);
