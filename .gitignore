@@ -6,3 +6,4 @@ dist/
 coverage/
 *.log
 .local-data/
+.local-media/

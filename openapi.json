@@ -3,7 +3,7 @@
   "info": {
     "title": "Threads Automation API (awal)",
     "version": "0.1.0",
-    "description": "API awal untuk sesi browser. Integrasi mesin dan endpoint konten belum tersedia."
+    "description": "API sesi browser untuk konten dan media. Autentikasi integrasi mesin belum tersedia."
   },
   "paths": {
     "/health/live": {
@@ -518,6 +518,46 @@
         }
       }
     },
+    "/api/media": {
+      "post": {
+        "operationId": "uploadMedia",
+        "description": "Unggah satu JPEG/PNG (maksimum 8 MiB) atau MP4 (maksimum 100 MiB) sebagai lampiran privat milik pengguna. PNG/JPEG dinormalisasi menjadi JPEG. MP4 harus memenuhi batas validasi aplikasi. Endpoint tersedia saat penyimpanan media dikonfigurasi.",
+        "security": [{ "session": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/Origin" }, { "$ref": "#/components/parameters/CsrfToken" }],
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "type": "object", "required": ["file"], "properties": { "file": { "type": "string", "format": "binary" } } } } } },
+        "responses": {
+          "201": { "description": "Media disimpan", "content": { "application/json": { "schema": { "type": "object", "required": ["media"], "properties": { "media": { "$ref": "#/components/schemas/Media" } } } } } },
+          "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" }, "403": { "$ref": "#/components/responses/Error" },
+          "413": { "description": "Ukuran unggahan melebihi batas" }, "429": { "$ref": "#/components/responses/RateLimit" }
+        }
+      }
+    },
+    "/api/media/{id}/content": {
+      "get": {
+        "operationId": "previewMedia", "description": "Pratinjau milik pengunggah atau media yang terikat pada versi konten tim.",
+        "security": [{ "session": [] }], "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "responses": { "200": { "description": "Berkas media", "content": { "image/jpeg": { "schema": { "type": "string", "format": "binary" } }, "video/mp4": { "schema": { "type": "string", "format": "binary" } } } }, "401": { "$ref": "#/components/responses/Error" }, "404": { "description": "Media tidak tersedia" } }
+      }
+    },
+    "/api/media/{id}": {
+      "delete": {
+        "operationId": "deleteUnattachedMedia", "description": "Hapus unggahan milik sendiri yang belum pernah terikat versi konten.",
+        "security": [{ "session": [] }], "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }, { "$ref": "#/components/parameters/Origin" }, { "$ref": "#/components/parameters/CsrfToken" }],
+        "responses": { "204": { "description": "Terhapus" }, "401": { "$ref": "#/components/responses/Error" }, "403": { "$ref": "#/components/responses/Error" }, "409": { "$ref": "#/components/responses/Error" } }
+      }
+    },
+    "/media-fetch/{job}/{id}/{expires}/{signature}": {
+      "get": {
+        "operationId": "fetchSignedPublicationMedia", "description": "URL terbatas waktu untuk pengambilan media oleh Meta, terikat pekerjaan dan versi konten. URL dan signature bersifat rahasia; jangan dicatat dalam log proxy.",
+        "parameters": [
+          { "name": "job", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "expires", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "signature", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Berkas media", "content": { "image/jpeg": { "schema": { "type": "string", "format": "binary" } }, "video/mp4": { "schema": { "type": "string", "format": "binary" } } } }, "404": { "description": "Tautan tidak valid atau kedaluwarsa" } }
+      }
+    },
     "/api/posts": {
       "get": {
         "operationId": "listPosts",
@@ -604,9 +644,10 @@
                 "properties": {
                   "body": {
                     "type": "string",
-                    "minLength": 1,
-                    "maxLength": 5000
+                    "maxLength": 5000,
+                    "description": "Boleh kosong jika mediaId diisi."
                   },
+                  "mediaId": { "type": ["string", "null"], "format": "uuid", "description": "Unggahan milik pembuat draft." },
                   "destinationAccountId": {
                     "type": [
                       "string",
@@ -670,9 +711,10 @@
                 "properties": {
                   "body": {
                     "type": "string",
-                    "minLength": 1,
-                    "maxLength": 5000
+                    "maxLength": 5000,
+                    "description": "Boleh kosong jika versi memiliki media."
                   },
+                  "mediaId": { "type": ["string", "null"], "format": "uuid", "description": "Jika dihilangkan lampiran dipertahankan; null menghapus lampiran pada versi baru." },
                   "revision": {
                     "type": "integer",
                     "minimum": 1
@@ -1452,6 +1494,10 @@
       }
     },
     "schemas": {
+      "Media": {
+        "type": "object", "required": ["id", "kind", "byteSize", "width", "height", "previewUrl"],
+        "properties": { "id": { "type": "string", "format": "uuid" }, "kind": { "type": "string", "enum": ["IMAGE", "VIDEO"] }, "byteSize": { "type": "integer" }, "width": { "type": "integer" }, "height": { "type": "integer" }, "previewUrl": { "type": "string" } }
+      },
       "Post": {
         "type": "object",
         "required": [
@@ -1499,6 +1545,8 @@
               "body": {
                 "type": "string"
               },
+              "media_id": { "type": ["string", "null"], "format": "uuid" },
+              "media_kind": { "type": ["string", "null"], "enum": ["IMAGE", "VIDEO", null] },
               "created_by": {
                 "type": "string",
                 "format": "uuid"

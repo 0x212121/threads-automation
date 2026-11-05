@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 
 type Job = { id: string; post_id: string; content_version: number; account_id: string; requested_by: string; status: 'preparing' | 'prepared'; lease_token: string; container_id: string | null };
-export type PublicationPayload = { body: string; threads_user_id: string; encrypted_token: Buffer; token_iv: Buffer; token_tag: Buffer };
+export type PublicationPayload = { body: string; media_id: string | null; media_kind: 'IMAGE' | 'VIDEO' | null; threads_user_id: string; encrypted_token: Buffer; token_iv: Buffer; token_tag: Buffer };
 
 export class PublicationQueue {
   constructor(private readonly pool: Pool) {}
@@ -23,7 +23,7 @@ export class PublicationQueue {
 
   async claim(): Promise<Job | null> {
     return this.transaction(async client => {
-      const result = await client.query<{ id: string; status: string }>("SELECT id,status FROM publication_jobs WHERE scheduled_at <= now() AND next_attempt_at <= now() AND scheduled_at + interval '1 hour' > now() AND (status='scheduled' OR (status IN ('preparing','prepared') AND lease_until <= now())) ORDER BY scheduled_at,id FOR UPDATE SKIP LOCKED LIMIT 1");
+      const result = await client.query<{ id: string; status: string }>("SELECT id,status FROM publication_jobs WHERE scheduled_at <= now() AND next_attempt_at <= now() AND scheduled_at + interval '1 hour' > now() AND (status='scheduled' OR (status IN ('preparing','prepared') AND (lease_until IS NULL OR lease_until <= now()))) ORDER BY scheduled_at,id FOR UPDATE SKIP LOCKED LIMIT 1");
       const candidate = result.rows[0];
       if (!candidate) return null;
       const lease = randomUUID();
@@ -45,7 +45,7 @@ export class PublicationQueue {
   }
 
   async payload(jobId: string, lease: string): Promise<PublicationPayload | null> {
-    const result = await this.pool.query<PublicationPayload>("SELECT v.body,a.threads_user_id,a.encrypted_token,a.token_iv,a.token_tag FROM publication_jobs j JOIN content_posts p ON p.id=j.post_id JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version JOIN threads_accounts a ON a.id=v.destination_account_id JOIN local_users u ON u.id=j.requested_by WHERE j.id=$1 AND j.lease_token=$2 AND j.lease_until>now() AND j.status IN ('preparing','prepared') AND p.status='approved' AND p.current_version=j.content_version AND v.destination_account_id=j.account_id AND a.status='active' AND a.token_expires_at>now() AND u.disabled_at IS NULL AND u.email_verified_at IS NOT NULL AND (p.created_by=u.id OR u.role IN ('admin','reviewer')) AND EXISTS (SELECT 1 FROM content_reviews r WHERE r.post_id=p.id AND r.content_version=p.current_version AND r.decision='approved')", [jobId, lease]);
+    const result = await this.pool.query<PublicationPayload>("SELECT v.body,v.media_id,m.kind AS media_kind,a.threads_user_id,a.encrypted_token,a.token_iv,a.token_tag FROM publication_jobs j JOIN content_posts p ON p.id=j.post_id JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version LEFT JOIN media_assets m ON m.id=v.media_id JOIN threads_accounts a ON a.id=v.destination_account_id JOIN local_users u ON u.id=j.requested_by WHERE j.id=$1 AND j.lease_token=$2 AND j.lease_until>now() AND j.status IN ('preparing','prepared') AND p.status='approved' AND p.current_version=j.content_version AND v.destination_account_id=j.account_id AND a.status='active' AND a.token_expires_at>now() AND u.disabled_at IS NULL AND u.email_verified_at IS NOT NULL AND (p.created_by=u.id OR u.role IN ('admin','reviewer')) AND EXISTS (SELECT 1 FROM content_reviews r WHERE r.post_id=p.id AND r.content_version=p.current_version AND r.decision='approved')", [jobId, lease]);
     return result.rows[0] ?? null;
   }
 
@@ -57,8 +57,17 @@ export class PublicationQueue {
       if (updated.rowCount) await client.query("INSERT INTO publication_attempts (id,job_id,stage,outcome) VALUES ($1,$2,'prepare','safe_failure')", [randomUUID(), jobId]);
     });
   }
-  async needsAction(jobId: string, lease: string, reason: 'preconditions' | 'token_unreadable' = 'preconditions'): Promise<void> {
+  async needsAction(jobId: string, lease: string, reason: 'preconditions' | 'token_unreadable' | 'meta_rejected' | 'meta_auth' | 'meta_unavailable' = 'preconditions'): Promise<void> {
     await this.pool.query("UPDATE publication_jobs SET status='needs_action',failure_code=$3,lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2 AND status IN ('preparing','prepared') AND lease_until>now()", [jobId, lease, reason]);
+  }
+  async deferPrepared(jobId: string, lease: string, failed = false): Promise<void> {
+    await this.pool.query("UPDATE publication_jobs SET next_attempt_at=now()+(CASE WHEN $3::boolean THEN LEAST(300,30*POWER(2,LEAST(status_check_failures,4))) ELSE 60 END)*interval '1 second',status_check_failures=CASE WHEN $3::boolean THEN status_check_failures+1 ELSE 0 END,lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2 AND status='prepared' AND lease_until>now()",[jobId,lease,failed]);
+  }
+  async preparedUncertain(jobId: string, lease: string) {
+    await this.transaction(async client => {
+      const changed = await client.query("UPDATE publication_jobs SET status='uncertain',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2 AND status='prepared' AND lease_until>now() RETURNING id",[jobId,lease]);
+      if (changed.rowCount) await client.query("INSERT INTO publication_attempts(id,job_id,stage,outcome) VALUES ($1,$2,'publish','uncertain')",[randomUUID(),jobId]);
+    });
   }
 
   async beginPublish(jobId: string, lease: string): Promise<boolean> {

@@ -7,8 +7,10 @@ COPY src ./src
 RUN npm run build && npm prune --omit=dev
 
 FROM node:24-alpine
+RUN apk add --no-cache ffmpeg && mkdir -p /app/media && chown node:node /app/media
 ENV NODE_ENV=production
 WORKDIR /app
+ENV MEDIA_DIR=/app/media
 COPY --from=build --chown=node:node /app/package*.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist

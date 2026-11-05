@@ -42,6 +42,7 @@ try {
   delete env.THREADS_APP_SECRET;
   delete env.THREADS_TOKEN_KEY;
   env.PUBLISH_WORKER_ENABLED = 'false';
+  env.MEDIA_DIR = resolve(dataRoot, 'media');
   await execute('dist/migrate.js', env);
   const client = new pg.Client({ host: '127.0.0.1', port: Number(pgPort), user: 'postgres', database: 'postgres' });
   await client.connect();

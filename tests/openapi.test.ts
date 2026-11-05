@@ -17,6 +17,10 @@ test('kontrak OpenAPI awal valid dan mendokumentasikan endpoint autentikasi', as
   assert.ok(api.paths?.['/api/threads/accounts']?.get);
   assert.ok(api.paths?.['/api/threads/oauth/start']?.post);
   assert.ok(api.paths?.['/api/threads/oauth/callback']?.get);
+  assert.ok(api.paths?.['/api/media']?.post);
+  assert.ok(api.paths?.['/api/media/{id}/content']?.get);
+  assert.ok(api.paths?.['/api/media/{id}']?.delete);
+  assert.ok(api.paths?.['/media-fetch/{job}/{id}/{expires}/{signature}']?.get);
   assert.ok(api.paths?.['/api/posts/{id}/schedule']?.post);
   assert.ok(api.paths?.['/api/posts/{id}/publish-now']?.post);
   assert.ok(api.paths?.['/api/posts/{id}/schedules/{jobId}/{action}']?.post);

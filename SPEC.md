@@ -4,7 +4,7 @@
 
 ## 1. Konteks dan keputusan produk
 
-Aplikasi digunakan secara internal, self-hosted, dengan pengguna berbasis undangan. Mendukung login lokal dan Google, pengelolaan tim dan persetujuan konten pada MVP, serta API yang terdokumentasi dengan OpenAPI untuk integrasi sistem lain. Satu tim digunakan bersama; semua anggota dapat melihat draft, hanya pembuat yang boleh mengubah dan mengajukan draft, sedangkan admin dan reviewer dapat menyetujui termasuk konten sendiri. Hanya admin menghubungkan akun Threads; semua anggota dapat memilih akun terhubung sebagai tujuan draft. Stack yang dipilih adalah TypeScript pada Node.js, PostgreSQL, dan Docker Compose. Email transaksional menggunakan SMTP generik yang akan dikonfigurasi kemudian. Perencanaan kapasitas awal: empat akun Threads per pengguna, 30 post per hari (cakupan total atau per pengguna belum ditentukan), dan 20 GB penyimpanan. Retensi data setidaknya 90 hari; cakupan dan pengecualian harus ditetapkan. Target ketepatan publikasi lima menit, dan percobaan otomatis berhenti setelah satu jam dari jadwal.
+Aplikasi digunakan secara internal, self-hosted, dengan pengguna berbasis undangan. Mendukung login lokal dan Google, pengelolaan tim dan persetujuan konten pada MVP, serta API yang terdokumentasi dengan OpenAPI untuk integrasi sistem lain. Satu tim digunakan bersama; semua anggota dapat melihat draft, hanya pembuat yang boleh mengubah dan mengajukan draft, sedangkan admin dan reviewer dapat menyetujui termasuk konten sendiri. Hanya admin menghubungkan akun Threads; semua anggota dapat memilih akun terhubung sebagai tujuan draft. Stack yang dipilih adalah TypeScript pada Node.js, PostgreSQL, dan Docker Compose. Media disimpan pada volume Docker persisten di server yang sama; Meta mengambilnya menggunakan URL HTTPS sementara. Email transaksional menggunakan SMTP generik yang akan dikonfigurasi kemudian. Perencanaan kapasitas awal: empat akun Threads per pengguna, 30 post per hari (cakupan total atau per pengguna belum ditentukan), dan 20 GB penyimpanan. Retensi data setidaknya 90 hari; cakupan dan pengecualian harus ditetapkan. Target ketepatan publikasi lima menit, dan percobaan otomatis berhenti setelah satu jam dari jadwal.
 
 **Penyelarasan PRD:** keputusan pada bagian 12 mengenai tim, undangan, GoWhatsapp dan retry satu jam telah dibawa ke bagian utama PRD. Rincian model akses dan persetujuan masih terbuka; jangan menerapkan aturan akses pribadi pada seluruh konten tim tanpa keputusan tersebut.
 
@@ -14,9 +14,9 @@ Aplikasi digunakan secara internal, self-hosted, dengan pengguna berbasis undang
 - **Backend/API:** validasi, autentikasi, otorisasi, aturan bisnis, penyimpanan dan kontrak OpenAPI. API eksternal tidak boleh melewati persetujuan atau otorisasi yang berlaku pada UI.
 - **Database:** data pengguna, tim, post, persetujuan, pekerjaan, notifikasi dan audit; transaksi melindungi perubahan status dan pengambilan pekerjaan.
 - **Worker:** mengeksekusi jadwal, memproses hasil Meta, memantau token dan mengirim notifikasi melalui adaptor GoWhatsapp. Pekerjaan persisten agar dapat dipulihkan setelah restart.
-- **Penyimpanan media:** penyimpanan persisten dengan kontrol akses dan mekanisme penyediaan media ke Meta sesuai dokumentasi yang berlaku.
+- **Penyimpanan media:** named volume Docker terpisah, metadata PostgreSQL, pratinjau berbasis sesi, dan URL HTTPS bertanda tangan sementara untuk Meta.
 - **Integrasi:** adaptor terpisah untuk Threads, Google, email transaksional dan GoWhatsapp; secret berada pada konfigurasi server yang aman.
-- **Operasional:** reverse proxy HTTPS, backup database dan media, health check, log dan monitoring. Topologi dan stack final belum dipilih.
+- **Operasional:** reverse proxy HTTPS, backup database dan media, health check, log dan monitoring. Konfigurasi proxy, backup dan pemantauan pada server tujuan belum divalidasi.
 
 ## 3. Identitas, undangan dan akses
 
@@ -32,7 +32,7 @@ Rancangan awal: draft → diajukan → disetujui/ditolak → dijadwalkan atau di
 
 Persetujuan harus terikat pada versi konten dan akun tujuan. Perubahan yang memengaruhi konten atau tujuan membatalkan persetujuan dan memerlukan pengajuan ulang. Perubahan waktu saja tidak membatalkan persetujuan. Catat aktor, waktu, versi dan keputusan; worker hanya memproses versi yang memenuhi kebijakan persetujuan yang telah ditetapkan.
 
-MVP minimal teks dan satu gambar atau video sebagaimana PRD; kebutuhan carousel atau rangkaian balasan masih terbuka. Validasi batas media dan teks terhadap versi API Meta yang digunakan; jangan mengasumsikan angka batas statis dari dokumen ini.
+MVP mendukung teks dan satu gambar atau video; carousel atau rangkaian balasan masih terbuka. Berkas divalidasi memakai batas aplikasi yang dijelaskan di README, dan Meta tetap memvalidasi pembatasan lainnya. Lampiran terikat pada versi konten; penggantian atau penghapusan media membuat versi baru dan membatalkan persetujuan.
 
 ## 5. Penjadwalan dan publikasi
 
@@ -60,11 +60,11 @@ Kemampuan yang direncanakan: identitas dan akses, anggota/undangan, akun Threads
 
 Entitas konseptual: User, AuthIdentity, Invitation, Team/Membership, ThreadsAccount, Post, PostVersion, Approval, Media, PublicationJob/Attempt, Notification/Delivery, IntegrationCredential dan AuditEvent. Kunci kepemilikan, keanggotaan dan relasinya menunggu keputusan model tim. Simpan token terenkripsi; pisahkan kunci enkripsi dari database dan rencanakan rotasi.
 
-Fondasi saat ini mencakup migrasi dan penyimpanan internal untuk post, versi, serta keputusan review yang terikat versi. Operasi perubahan memakai transaksi, penguncian baris dan pemeriksaan revisi untuk mencegah perubahan yang tertimpa. API login lokal memakai sesi PostgreSQL, CSRF dan cookie HTTP-only; limit percobaan masih per proses dan perlu penyimpanan bersama sebelum produksi. API konten berbasis sesi memungkinkan anggota aktif melihat draft tim, membuat draft dan menjalankan alur persetujuan sesuai hak di atas. Draft teks dapat memilih akun Threads aktif; OAuth dan penyimpanan token terenkripsi sudah dibuat namun belum diuji dengan Meta sungguhan. Token verifikasi email disimpan sebagai hash, sekali pakai dan berlaku 24 jam. Tautan dikirim melalui SMTP yang dikonfigurasi dan harus dikonfirmasi saat masuk ke akun yang sama. Undangan menggunakan token satu kali dan membuat akun lokal dengan email terverifikasi. SMTP nyata belum diuji. Worker publikasi teks dan antrean persisten tersedia untuk pengujian dan dinonaktifkan secara default. Hasil pengiriman yang tidak pasti memerlukan konfirmasi manual yang diaudit; tidak ada pengiriman ulang otomatis. Meta, PostgreSQL server dan deployment nyata belum diuji.
+Fondasi saat ini mencakup migrasi dan penyimpanan internal untuk post, versi, media serta keputusan review yang terikat versi. Operasi perubahan memakai transaksi, penguncian baris dan pemeriksaan revisi untuk mencegah perubahan yang tertimpa. API login lokal memakai sesi PostgreSQL, CSRF dan cookie HTTP-only; limit percobaan masih per proses dan perlu penyimpanan bersama sebelum produksi. API konten berbasis sesi memungkinkan anggota aktif melihat draft tim, membuat draft dan menjalankan alur persetujuan sesuai hak di atas. Pengguna melaporkan OAuth berhasil dengan akun Threads Tester; penerbitan media baru diuji dengan respons simulasi. Token verifikasi email disimpan sebagai hash, sekali pakai dan berlaku 24 jam. Undangan menggunakan token satu kali dan membuat akun lokal dengan email terverifikasi. Worker publikasi dan antrean persisten tersedia untuk pengujian dan dinonaktifkan secara default. Hasil pengiriman yang tidak pasti memerlukan konfirmasi manual yang diaudit; tidak ada pengiriman ulang otomatis. Pengujian Meta media, PostgreSQL server dan deployment nyata masih diperlukan.
 
 Antarmuka utama telah terhubung ke API login dan draft. Untuk pengembangan pada satu komputer tersedia `npm run local`, menggunakan PostgreSQL berbasis WASM dengan penyimpanan lokal dan socket tanpa autentikasi yang hanya terikat ke loopback. Mode ini bukan pengganti PostgreSQL dan pengamanan deployment produksi.
 
-Klien OAuth Threads membangun URL otorisasi, menukar kode dan memeriksa profil terhadap identitas token. Endpoint callback `/api/threads/oauth/callback` memakai state sekali pakai yang terikat sesi admin terverifikasi. Token dienkripsi menggunakan kunci terpisah yang harus disimpan persisten. Pengujian baru memakai respons simulasi; pengujian Meta nyata, verifikasi izin yang benar-benar diberikan, pembaruan otomatis token dan produksi masih diperlukan.
+Klien OAuth Threads membangun URL otorisasi, menukar kode dan memeriksa profil terhadap identitas token. Endpoint callback `/api/threads/oauth/callback` memakai state sekali pakai yang terikat sesi admin terverifikasi. Token dienkripsi menggunakan kunci terpisah yang harus disimpan persisten. Pengguna melaporkan koneksi berhasil melalui akun tester; verifikasi izin yang benar-benar diberikan, pembaruan otomatis token dan pengujian produksi masih diperlukan.
 
 Pembacaan respons mempertahankan ID numerik besar sebagai teks dari sumber JSON asli pada Node.js 24. Kegagalan callback dikembalikan sebagai tahap terbatas (sesi, penolakan, pertukaran kode, token jangka panjang, profil, atau penyimpanan), dengan kode Meta numerik jika tersedia. Log hanya mencatat event, tahap, status HTTP, kode/subkode Meta dan kategori terbatas, tanpa pesan mentah, URL permintaan, kode otorisasi atau token. State tetap sekali pakai meskipun pertukaran gagal; pengguna harus memulai koneksi baru.
 
@@ -77,6 +77,8 @@ Tombol koneksi admin memeriksa ulang status pengguna dan konfigurasi saat diklik
 URL otorisasi dibuat langsung pada `https://www.threads.com/oauth/authorize`, tujuan redirect yang diamati pada 5 November 2026. Browser memeriksa `client_id`, `response_type`, state dan callback sebelum navigasi. Domain Threads lama masih diterima untuk kompatibilitas saat frontend dan backend diperbarui bertahap. Perubahan domain ini mengurangi redirect dan belum membuktikan penyebab error Meta tertentu.
 
 Kegagalan sebelum pengiriman publikasi dicatat sebagai kode diagnosis terbatas yang aman ditampilkan, tanpa menyimpan pesan mentah Meta. Kegagalan setelah pengiriman tetap dianggap belum pasti dan tidak diulang otomatis. Permintaan pembuatan kontainer dan publikasi memakai parameter sebagaimana contoh koleksi resmi Meta.
+
+Worker mengirim satu URL lampiran HTTPS bertanda tangan yang terikat pekerjaan dan versi serta berlaku dua jam. Pengambilan publik hanya diizinkan untuk pekerjaan yang sesuai; siapa pun yang memiliki URL dapat mengakses berkas selama masa berlaku, sehingga URL tidak boleh masuk log proxy/CDN. Worker memeriksa status kontainer media sebelum publikasi dan menunggu jika belum siap; status PUBLISHED tanpa ID hasil menjadi belum pasti. Metadata media dibatasi total 20 GB; kapasitas disk fisik, berkas sementara/yatim, dan backup harus tetap dipantau. Pengujian media end-to-end nyata belum dilakukan.
 
 Retensi minimal 90 hari perlu diterjemahkan per jenis data, termasuk log, media, post, audit dan backup, dengan kebijakan penghapusan dan kapasitas 20 GB. Backup dan restore harus diuji; RPO/RTO belum ditetapkan. Monitoring minimal mencakup worker, antrean, keterlambatan, status integrasi, kegagalan notifikasi dan kapasitas. Sediakan prosedur pemulihan serta konfigurasi self-hosting yang dapat direproduksi.
 
@@ -93,7 +95,7 @@ Retensi minimal 90 hari perlu diterjemahkan per jenis data, termasuk log, media,
 
 1. Rincian matriks peran dan kebijakan persetujuan yang belum diputuskan.
 2. Format konten MVP selain teks dan satu media; total atau per pengguna untuk target 30 post/hari; jumlah pengguna.
-3. Stack, host, sistem operasi, cara deployment, database, penyimpanan dan email transaksional.
+3. Host, sistem operasi, detail deployment dan email transaksional; volume Docker dipilih untuk media.
 4. Versi dan konfigurasi instalasi [GoWhatsapp Web Multidevice](https://github.com/aldinokemal/go-whatsapp-web-multidevice) yang digunakan, penerima serta aturan notifikasi.
 5. Hak dan autentikasi API mesin, kontrak endpoint dan kebutuhan integrasi pertama.
 6. Definisi retensi 90 hari per jenis data, penghapusan, backup, serta RPO/RTO.

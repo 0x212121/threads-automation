@@ -1,8 +1,8 @@
 # Threads Automation
 
-Proyek aplikasi internal untuk pengelolaan dan penjadwalan konten Threads. Aplikasi utama menyediakan login, draft teks, persetujuan, serta penjadwalan dan penerbitan teks Threads untuk pengujian terbatas.
+Proyek aplikasi internal untuk pengelolaan dan penjadwalan konten Threads. Aplikasi utama menyediakan login, draft teks dengan satu gambar atau video, persetujuan, serta penjadwalan dan penerbitan untuk pengujian terbatas.
 
-Yang tersedia: antarmuka utama, login lokal, penyimpanan database, draft teks, dan persetujuan. Aplikasi utama terpisah dari demo; data keduanya tidak digabungkan.
+Yang tersedia: antarmuka utama, login lokal, database, lampiran media, draft, dan persetujuan. Aplikasi utama terpisah dari demo; data keduanya tidak digabungkan.
 
 ## Menjalankan aplikasi utama secara lokal
 
@@ -21,11 +21,11 @@ Mode ini menjalankan PostgreSQL berbasis WASM lokal dan menyimpan data di `.loca
 
 Jalankan `npm run demo`, lalu buka `http://127.0.0.1:4173`. Demo hanya menggunakan Node.js dan penyimpanan lokal browser; tidak memerlukan database atau akun. Demo menyediakan alur draft, pengajuan, persetujuan, filter, dan jadwal simulasi. Tidak ada login, sinkronisasi tim, koneksi Threads, notifikasi, atau publikasi otomatis. Menghapus data situs di browser akan menghapus data demo. Untuk menggunakan port lain, atur environment variable `DEMO_PORT` sebelum menjalankan server.
 
-OAuth Threads telah ditambahkan dan diuji dengan respons simulasi, tetapi belum diuji terhadap Meta sungguhan. Belum tersedia: pengelolaan anggota setelah bergabung, pembaruan otomatis token Threads, penerbitan media, Google Sign-In, GoWhatsapp, serta akses API untuk integrasi mesin. Draft mendukung teks nonkosong dan pilihan akun Threads aktif; draft kosong dan media belum tersedia. Undangan dan verifikasi email tersedia jika SMTP dikonfigurasi dan belum diuji dengan layanan nyata. Jangan gunakan untuk produksi.
+Pengguna melaporkan koneksi OAuth berhasil dengan akun Threads Tester. Publikasi media baru diuji dengan respons Meta simulasi dan belum diuji melalui Meta sungguhan. Belum tersedia: pengelolaan anggota setelah bergabung, pembaruan otomatis token Threads, Google Sign-In, GoWhatsapp, serta akses API untuk integrasi mesin. Draft membutuhkan teks atau satu lampiran. Undangan dan verifikasi email tersedia jika SMTP dikonfigurasi; hasil pengujian SMTP nyata belum didokumentasikan. Jangan gunakan untuk produksi.
 
 ## Pengembangan lokal
 
-Gunakan Node.js 24 dan PostgreSQL. Jalankan `npm ci`, lalu atur `DATABASE_URL`, `APP_ORIGIN` (misalnya `http://localhost:3000`) dan `SESSION_SECRET` acak minimal 32 byte sebagai environment variables; `PORT` opsional. File `.env.example` hanya contoh dan tidak dimuat otomatis. Setelah migrasi, jalankan `npm run dev`. Endpoint `/health/live` memeriksa proses dan `/health/ready` hanya memeriksa koneksi database. `npm test` menjalankan pengujian dan `npm run build` mengompilasi proyek.
+Gunakan Node.js 24 dan PostgreSQL. Unggahan video memerlukan `ffprobe` dari FFmpeg pada PATH; image Docker memasukkannya. Jalankan `npm ci`, lalu atur `DATABASE_URL`, `APP_ORIGIN` (misalnya `http://localhost:3000`) dan `SESSION_SECRET` acak minimal 32 byte sebagai environment variables; `PORT` opsional. File `.env.example` hanya contoh dan tidak dimuat otomatis. Setelah migrasi, jalankan `npm run dev`. Endpoint `/health/live` memeriksa proses dan `/health/ready` hanya memeriksa koneksi database. `npm test` menjalankan pengujian dan `npm run build` mengompilasi proyek.
 
 Untuk menerapkan migrasi pada database pengembangan, jalankan `npm run build` diikuti `npm run migrate` dengan `DATABASE_URL` atau variabel `PGHOST`, `PGDATABASE`, `PGUSER`, dan `PGPASSWORD` yang sudah dikonfigurasi. Migrasi mencatat checksum dan tidak mengubah ulang migrasi yang sudah diterapkan. Buat backup sebelum menerapkan perubahan pada database yang berisi data. Migrasi belum berjalan otomatis saat service dimulai.
 
@@ -65,12 +65,33 @@ Panel **Hubungkan akun Threads** berada di halaman utama setelah masuk. Tombol d
 
 Klik tombol akan memeriksa ulang akun dan konfigurasi terbaru. Jika email baru diverifikasi melalui tab lain, klik kembali tanpa perlu keluar dan masuk. Jika belum memenuhi syarat, pesan tampil langsung di panel koneksi. Saat siap, aplikasi mengarahkan browser ke otorisasi Threads; tautan **Lanjutkan ke otorisasi Threads** tersedia jika perpindahan otomatis tidak terjadi. Pemeriksaan admin, email, CSRF, dan state OAuth tetap dilakukan di server.
 
-## Penjadwalan dan penerbitan teks
+## Penjadwalan dan penerbitan
 
-Fitur ini baru diuji dengan respons Meta simulasi, belum dengan akun Threads atau server PostgreSQL sungguhan. Worker dinonaktifkan secara default, termasuk pada `npm run local`. Setelah mengonfigurasi OAuth, SMTP, HTTPS dan migrasi, operator dapat mengaktifkannya di lingkungan pengujian dengan `PUBLISH_WORKER_ENABLED=true` dan memulai ulang aplikasi. Pastikan konfigurasi Threads lengkap; tombol penjadwalan tidak tersedia saat worker dinonaktifkan. Pengaktifan worker akan memproses pekerjaan yang jatuh tempo.
+Penerbitan, termasuk media, baru diuji dengan respons Meta simulasi dan PostgreSQL berbasis WASM; belum diuji end-to-end dengan Meta, Docker, atau server PostgreSQL sungguhan. Worker dinonaktifkan secara default, termasuk pada `npm run local`. Setelah mengonfigurasi OAuth, SMTP, HTTPS dan migrasi, operator dapat mengaktifkannya di lingkungan pengujian dengan `PUBLISH_WORKER_ENABLED=true` dan memulai ulang aplikasi. Pastikan konfigurasi Threads lengkap; tombol penjadwalan tidak tersedia saat worker dinonaktifkan. Pengaktifan worker akan memproses pekerjaan yang jatuh tempo.
 
 Admin menghubungkan akun Threads. Anggota membuat draft teks dan mengajukannya; admin atau reviewer menyetujui. Pembuat draft, admin, atau reviewer dapat menjadwalkan, mengubah waktu, membatalkan sebelum diproses, atau menerbitkan sekarang. Waktu disimpan dalam UTC bersama zona waktu yang dipilih; mengubah waktu saja tidak membatalkan persetujuan. Token yang akan kedaluwarsa sebelum jadwal harus dihubungkan ulang.
 
-Worker mencatat percobaan dan hanya mencoba ulang kegagalan sementara yang aman sebelum tahap publikasi, dengan jeda bertambah dan tenggat satu jam. Jika hasil pengiriman ke Meta tidak dapat dipastikan, periksa akun Threads secara manual sebelum menandai hasilnya; aplikasi tidak otomatis mengirim ulang karena dapat membuat duplikat. Hasil konfirmasi manual dicatat. Penerbitan media, pembaruan token otomatis, validasi batas konten sebelum pengiriman, dan pengujian Meta nyata masih diperlukan.
+Worker mencatat percobaan dan hanya mencoba ulang kegagalan sementara yang aman sebelum tahap publikasi, dengan jeda bertambah dan tenggat satu jam. Untuk media, worker memeriksa status kontainer sampai siap; status sudah terbit tetapi tidak dikenali menjadi hasil belum pasti. Jika hasil pengiriman ke Meta tidak dapat dipastikan, periksa akun Threads secara manual sebelum menandai hasilnya; aplikasi tidak otomatis mengirim ulang karena dapat membuat duplikat. Hasil konfirmasi manual dicatat. Pembaruan token otomatis, validasi seluruh batas konten Meta sebelum pengiriman, dan pengujian Meta nyata masih diperlukan.
 
-Untuk instalasi Compose yang sudah ada, ambil perubahan proyek di server, lalu jalankan `docker compose build app`, `docker compose run --rm app npm run migrate`, dan `docker compose up -d app` secara berurutan. Backup database sebelum migrasi. Aktifkan worker dengan `PUBLISH_WORKER_ENABLED=true` di `.env` hanya saat siap memproses antrean. Pastikan `APP_ORIGIN`, konfigurasi Threads dan SMTP sudah benar serta email admin terverifikasi. Setelah menghubungkan akun, buat draft teks, ajukan, setujui, lalu pilih **Terbitkan sekarang**. Muat ulang daftar untuk melihat hasil. Jika berstatus **Perlu tindakan**, baca petunjuk di bawah status; jangan membagikan token atau secret saat meminta bantuan.
+Untuk instalasi Compose yang sudah ada, backup database dan volume media terlebih dahulu. Tunggu sampai tidak ada publikasi yang sedang diproses, lalu hentikan semua instance aplikasi lama agar worker lama tidak mengambil pekerjaan bermedia. Ambil kode baru dan jalankan:
+
+```bash
+docker compose stop app
+docker compose build app
+docker compose run --rm app npm run migrate
+docker compose up -d app
+```
+
+Aktifkan worker dengan `PUBLISH_WORKER_ENABLED=true` di `.env` hanya saat siap memproses antrean. Pastikan `APP_ORIGIN`, konfigurasi Threads dan SMTP sudah benar serta email admin terverifikasi. Setelah menghubungkan akun, buat draft, ajukan, setujui, lalu pilih **Terbitkan sekarang**. Muat ulang daftar untuk melihat hasil. Jika berstatus **Perlu tindakan**, baca petunjuk di bawah status; jangan membagikan token atau secret saat meminta bantuan.
+
+## Media
+
+Compose menyimpan media dalam named volume `media`, terpisah dari volume database. Backup dan pulihkan keduanya bersama-sama; menghapus volume akan menghapus lampiran. Di luar Compose, `MEDIA_DIR` memilih direktori penyimpanan (default `.local-media`); `npm run local` memakai direktori media di bawah `.local-data`. Pastikan direktori dimiliki pengguna aplikasi dan tersedia ruang disk yang cukup.
+
+Satu draft dapat berisi teks, satu gambar, atau satu video. Gambar JPEG/PNG maksimal 8 MiB dinormalisasi menjadi JPEG, diputar sesuai orientasi dan diperkecil hingga 1440 piksel per sisi; transparansi diratakan ke putih. Video dibatasi 100 MiB, MP4 H.264, 3–300 detik, 23–60 fps, maksimal 1920 piksel per sisi, dengan maksimal satu audio AAC 48 kHz. Ini adalah batas aplikasi untuk pengujian; Meta tetap memeriksa persyaratan format lainnya. Mengubah atau menghapus lampiran membuat versi baru yang perlu disetujui kembali.
+
+Unggahan yang belum terikat versi hanya dapat dilihat/dihapus pengunggah; seluruh anggota tim dapat melihat lampiran yang sudah terikat ke versi konten. Berkas versi lama dipertahankan. Kapasitas metadata media dibatasi 20 GB; berkas sementara dan sisa akibat proses terhenti tidak dihitung dalam kuota tersebut, sehingga ruang disk tetap harus dipantau. Penghapusan otomatis berkas yatim, kebijakan retensi terperinci, dan backup/restore teruji belum tersedia.
+
+Untuk menerbitkan media, `APP_ORIGIN` harus HTTPS dan dapat diakses Meta. Server membuat URL unduhan bertanda tangan yang berlaku dua jam untuk pekerjaan dan lampiran tertentu. Siapa pun yang memiliki URL itu dapat mengunduh berkas selama berlaku. Konfigurasikan reverse proxy, CDN, dan sistem log agar **tidak mencatat path `/media-fetch/`**, karena path tersebut mengandung tanda tangan; jangan bagikan URL itu. Tanda tangan menggunakan `SESSION_SECRET` yang harus konsisten antar-instance; perubahan secret membatalkan URL media yang masih digunakan. Pengujian akses dari Meta, konfigurasi proxy, dan penanganan video dengan Docker nyata masih diperlukan.
+
+Pastikan proxy tidak menambahkan login pada `/media-fetch/` dan meneruskan permintaan `GET` serta header `Range`, agar Meta dapat mengambil video. Sesuaikan batas ukuran unggahan proxy untuk multipart 100 MiB; misalnya pada Nginx gunakan `client_max_body_size 101m` di konfigurasi server atau location aplikasi. Batas CDN/proxy di depan server juga dapat membatasi unggahan sebelum mencapai aplikasi.

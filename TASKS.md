@@ -19,14 +19,14 @@ Status awal: perencanaan. Kotak belum dicentang bukan klaim bahwa pekerjaan suda
 ## 2. Fondasi dan akses
 
 - [x] Buat migrasi awal dan penyimpanan internal untuk konten, versi, dan persetujuan; uji dengan PostgreSQL berbasis WASM. Pengujian server PostgreSQL dan Docker masih diperlukan.
-- [x] Tambahkan perintah terminal satu kali untuk bootstrap administrator dengan kata sandi tersembunyi dan hash tersalt. Pengujian terminal serta PostgreSQL/Docker sungguhan masih diperlukan; verifikasi email belum tersedia.
+- [x] Tambahkan perintah terminal satu kali untuk bootstrap administrator dengan kata sandi tersembunyi dan hash tersalt. Pengujian PostgreSQL/Docker sungguhan masih diperlukan.
 - [x] Tambahkan API login/logout lokal, sesi, CSRF, dan kontrak OpenAPI awal. Pengujian dengan PostgreSQL nyata, limiter bersama, halaman login, dan alur verifikasi email masih diperlukan.
 - [x] Tambahkan penyimpanan dan validasi internal token verifikasi email sekali pakai.
 - [x] Tambahkan adaptor SMTP generik dengan TLS, endpoint dan antarmuka untuk verifikasi email. Pengujian ke server SMTP nyata masih diperlukan.
 - [x] Tambahkan undangan email sekali pakai, pembuatan akun lokal melalui tautan, serta antarmuka untuk admin dan penerima. Pengujian SMTP nyata, pencabutan manual, dan administrasi anggota masih diperlukan.
 - [x] Tambahkan pemulihan kata sandi berbasis email dengan token sekali pakai dan pembatalan sesi lama; uji SMTP sungguhan dan pengamanan produksi masih diperlukan.
-- [x] Tambahkan API awal draft teks dan persetujuan berbasis sesi, dengan baca tim, perubahan/pengajuan oleh pembuat, serta review oleh admin/reviewer. Akun tujuan, media dan undangan belum tersedia.
-- [x] Hubungkan antarmuka utama ke API login dan draft; sediakan mode pengembangan lokal persisten tanpa instalasi PostgreSQL. Pengujian visual browser, deployment nyata, undangan dan integrasi Threads masih diperlukan.
+- [x] Tambahkan API draft dan persetujuan berbasis sesi, dengan baca tim, perubahan/pengajuan oleh pembuat, serta review oleh admin/reviewer.
+- [x] Hubungkan antarmuka utama ke API login dan draft; sediakan mode pengembangan lokal persisten tanpa instalasi PostgreSQL. Pengujian visual browser dan deployment nyata masih diperlukan.
 - [ ] Siapkan repository aplikasi, konfigurasi self-hosted, database/migrasi, penyimpanan media dan secret management sesuai stack yang dipilih.
 - [ ] Implementasikan bootstrap admin, undangan, autentikasi lokal, verifikasi email, reset, sesi, Google dan penautan identitas aman.
 - [ ] Implementasikan tim, keanggotaan, peran dan pemeriksaan akses backend serta audit.
@@ -40,18 +40,20 @@ Status awal: perencanaan. Kotak belum dicentang bukan klaim bahwa pekerjaan suda
 - [x] Gunakan tujuan otorisasi Threads langsung dan validasi parameter sebelum navigasi; uji bahwa `client_id` tersertakan dan URL tanpa ID diblokir. Penyebab error Meta 4476002 pada instalasi pengguna masih perlu diagnosis runtime.
 - [x] Pertahankan ID numerik besar pada pertukaran OAuth dan tampilkan diagnosis tahap callback dengan log aman. Uji sesi hilang/kedaluwarsa, penolakan, respons rusak, dan kebocoran data sensitif; uji Meta nyata masih diperlukan.
 - [x] Sesuaikan pertukaran token jangka panjang dengan parameter `access_token` pada GET sesuai contoh Meta; uji parameter dan penyamaran kegagalan transport. Konfirmasi ulang dengan akun Meta nyata masih diperlukan.
-- [x] Tampilkan subkode/kategori Meta yang aman agar penolakan tester/App Review, izin, dan kredensial dapat dibedakan tanpa membuka pesan mentah. Uji kategori dari respons simulasi dan tidak bocornya secret; status tester pengguna masih perlu dikonfirmasi.
-- [ ] Implementasikan koneksi Threads, penyimpanan token terenkripsi, status, refresh dan pemutusan.
-- [ ] Implementasikan komposer, validasi media, draft, pratinjau dan riwayat versi.
-- [ ] Implementasikan pengajuan, persetujuan/penolakan dan invalidasi persetujuan sesuai kebijakan yang disepakati.
+- [x] Tampilkan subkode/kategori Meta yang aman agar penolakan tester/App Review, izin, dan kredensial dapat dibedakan tanpa membuka pesan mentah. Uji kategori dari respons simulasi dan tidak bocornya secret.
+- [x] Pengguna melaporkan koneksi OAuth berhasil setelah akun Threads diundang dan menerima peran tester. Pengujian izin secara menyeluruh dan publikasi Meta nyata masih perlu dicatat.
+- [x] Tambahkan satu lampiran gambar/video, pratinjau, volume Docker persisten, URL HTTPS bertanda tangan, validasi sisi server, versi media dan polling kontainer. Uji Meta, Docker dan PostgreSQL sungguhan, backup/restore serta pembersihan berkas yatim masih diperlukan.
+- [ ] Lengkapi koneksi Threads dengan refresh token otomatis, pemeriksaan izin, dan pemutusan akun.
+- [ ] Lengkapi validasi media/teks terhadap semua batas Meta, tampilan riwayat versi, retensi dan pembersihan berkas yatim.
+- [ ] Validasi kebijakan persetujuan dan pembatalannya terhadap seluruh alur UI, API dan kondisi bersamaan.
 
 ## 4. Publikasi dan notifikasi
 
 - [x] Implementasikan penjadwalan dan penerbitan teks dengan worker opt-in, lease, tenggat, backoff aman dan konfirmasi manual untuk hasil belum pasti. Uji Meta serta PostgreSQL sungguhan dan kelengkapan penanganan limit masih diperlukan.
 - [x] Tambahkan diagnosis aman untuk kegagalan persiapan dan uji simulasi dari permintaan publikasi sampai status terbit. Uji posting dengan akun Meta sungguhan masih diperlukan.
 
-- [ ] Implementasikan jadwal UTC/zona waktu, antrean persisten, klaim atomik, lease, batas satu jam dan riwayat.
-- [ ] Implementasikan publikasi sekarang/terjadwal, klasifikasi error, retry aman dan rekonsiliasi hasil belum pasti.
+- [ ] Validasi jadwal UTC/zona waktu, antrean persisten, klaim atomik, lease, batas satu jam dan riwayat pada PostgreSQL serta deployment nyata.
+- [ ] Lengkapi klasifikasi error dan rekonsiliasi publikasi; uji penerbitan sekarang/terjadwal dengan Meta sungguhan.
 - [ ] Implementasikan dashboard, kalender, status, notifikasi aplikasi dan GoWhatsapp dengan riwayat pengiriman.
 
 ## 5. API dan kesiapan rilis

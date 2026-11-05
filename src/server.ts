@@ -6,6 +6,7 @@ import { createSmtpTransport } from './smtp.js';
 import { ThreadsOAuthClient } from './threads-oauth-client.js';
 import { TokenVault } from './token-vault.js';
 import { startPublicationWorker } from './publication-worker.js';
+import { MediaStore } from './media-store.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl && !process.env.PGHOST) throw new Error('DATABASE_URL atau PGHOST wajib diatur.');
@@ -34,12 +35,13 @@ if (threadsId || threadsSecret || tokenKey) {
 const publishingEnabled = process.env.PUBLISH_WORKER_ENABLED === 'true';
 if (process.env.PUBLISH_WORKER_ENABLED && !['true', 'false'].includes(process.env.PUBLISH_WORKER_ENABLED)) throw new Error('PUBLISH_WORKER_ENABLED harus true atau false.');
 if (publishingEnabled && !threads) throw new Error('Worker publikasi memerlukan konfigurasi Threads.');
-const app = await createApp({ pool, store, secret, origin, secure: production, trustProxy: process.env.TRUST_PROXY === '1', mail, threads, publishingEnabled });
+const media = new MediaStore(pool,process.env.MEDIA_DIR ?? '.local-media',secret);
+const app = await createApp({ pool, store, secret, origin, secure: production, trustProxy: process.env.TRUST_PROXY === '1', mail, threads, publishingEnabled, media });
 
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT tidak valid.');
 const server = app.listen(port, process.env.LOCAL_PGLITE === '1' ? '127.0.0.1' : '0.0.0.0', () => console.log(`Service listening on ${port}`));
-const stopWorker = publishingEnabled && threads ? startPublicationWorker(pool, threads.vault) : () => {};
+const stopWorker = publishingEnabled && threads ? startPublicationWorker(pool, threads.vault,{ store: media, origin }) : () => {};
 async function stop() {
   stopWorker(); server.close(async () => { await pool.end(); process.exit(0); });
 }

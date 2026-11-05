@@ -34,6 +34,9 @@ services:
       THREADS_APP_SECRET: ${THREADS_APP_SECRET:-}
       THREADS_TOKEN_KEY: ${THREADS_TOKEN_KEY:-}
       PUBLISH_WORKER_ENABLED: ${PUBLISH_WORKER_ENABLED:-false}
+      MEDIA_DIR: /app/media
+    volumes:
+      - media:/app/media
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -42,3 +45,4 @@ services:
     restart: unless-stopped
 volumes:
   database:
+  media:

@@ -2,6 +2,7 @@
 const statusLabels = { draft: 'Draft', submitted: 'Menunggu tinjauan', approved: 'Disetujui', rejected: 'Ditolak' };
 let csrf = '', user = null, posts = [], accounts = [], accountsAvailable = true, threadsConfigured = null, publishingEnabled = false, nextOffset = null, editing = null, scheduling = null, busy = false;
 let threadsConnecting = false;
+let editorMedia = null, pendingMedia = null, previewObjectUrl = null, uploadedMediaIds = new Set();
 const linkParams = new URLSearchParams(location.hash.slice(1));
 let verificationToken = linkParams.get('verify'), invitationToken = linkParams.get('invite'), resetToken = linkParams.get('reset');
 let threadsResult = linkParams.get('threads');
@@ -9,7 +10,7 @@ if (verificationToken || invitationToken || resetToken || threadsResult) history
 
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
-  if (options.method && options.method !== 'GET') { headers['Content-Type'] = 'application/json'; headers['X-CSRF-Token'] = csrf; }
+  if (options.method && options.method !== 'GET') { if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json'; headers['X-CSRF-Token'] = csrf; }
   const response = await fetch(path, { ...options, credentials: 'same-origin', headers });
   let data = {};
   if (response.status !== 204) { try { data = await response.json(); } catch { /* The generic error is shown below. */ } }
@@ -23,6 +24,7 @@ function errorAt(id, message) { const element = $(id); element.textContent = mes
 function setBusy(value) {
   busy = value;
   $('#save-post').disabled = value;
+  for (const id of ['#post-media','#remove-media','#close-editor','#cancel-editor','#logout','#new-post','#empty-create']) $(id).disabled = value;
   document.querySelectorAll('.action').forEach(button => { button.disabled = value; });
 }
 function showLogin() { if ($('#editor').open) $('#editor').close(); if ($('#invite-dialog').open) $('#invite-dialog').close(); if ($('#schedule-dialog').open) $('#schedule-dialog').close(); $('#initial-loading').hidden = true; $('#workspace').hidden = true; $('#login-screen').hidden = false; $('#password').value = ''; $('#login-form').hidden = !!invitationToken || !!resetToken; $('#accept-invitation-form').hidden = !invitationToken; $('#reset-request-form').hidden = true; $('#reset-confirm-form').hidden = !resetToken; }
@@ -105,7 +107,14 @@ function render() {
   const list = $('#post-list'); list.replaceChildren();
   for (const post of visible) {
     const row = $('#post-template').content.firstElementChild.cloneNode(true);
-    row.querySelector('.post-text').textContent = post.body;
+    row.querySelector('.post-text').textContent = post.body || (post.media_kind === 'VIDEO' ? 'Post video' : 'Post gambar');
+    if (post.media_id && ['IMAGE','VIDEO'].includes(post.media_kind)) {
+      const preview = document.createElement(post.media_kind === 'IMAGE' ? 'img' : 'video');
+      preview.src = `/api/media/${encodeURIComponent(post.media_id)}/content`; preview.width = 160; preview.height = 120; preview.className = 'media-preview';
+      if (post.media_kind === 'IMAGE') { preview.alt = 'Lampiran gambar'; preview.loading = 'lazy'; }
+      else { preview.controls = true; preview.preload = 'metadata'; }
+      row.querySelector('.post-text').after(preview);
+    }
     const created = new Date(post.created_at);
     row.querySelector('.post-created').textContent = `${Number.isNaN(created.getTime()) ? '' : `Dibuat ${new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(created)}`}${post.destination_username ? ` · @${post.destination_username}` : ''}`;
     const status = row.querySelector('.status'); status.textContent = statusLabels[post.status] || post.status; status.classList.add(post.status);
@@ -158,7 +167,9 @@ async function transition(post, action) {
   finally { setBusy(false); }
 }
 function openEditor(post = null) {
+  if (busy) return;
   editing = post; $('#post-text').value = post?.body || ''; $('#editor-title').textContent = post ? 'Ubah draft' : 'Buat draft';
+  editorMedia = post?.media_id ? { id: post.media_id, kind: post.media_kind } : null; pendingMedia = null; uploadedMediaIds = new Set(); $('#post-media').value = ''; renderEditorMedia();
   const select = $('#post-account'); select.replaceChildren();
   const blank = document.createElement('option'); blank.value = ''; blank.textContent = 'Belum dipilih'; select.append(blank);
   for (const account of accounts) { const option = document.createElement('option'); option.value = account.id; option.textContent = `@${account.username}`; select.append(option); }
@@ -168,6 +179,43 @@ function openEditor(post = null) {
   $('#account-help').textContent = !accountsAvailable ? 'Daftar akun tidak dapat dimuat. Akun tujuan draft yang ada akan dipertahankan.' : accounts.length ? 'Pilih akun tujuan yang terhubung atau biarkan kosong.' : 'Belum ada akun Threads yang terhubung.';
   errorAt('#form-error', ''); $('#editor').showModal(); $('#post-text').focus();
 }
+function renderEditorMedia() {
+  if (previewObjectUrl) { URL.revokeObjectURL(previewObjectUrl); previewObjectUrl = null; }
+  const container = $('#media-preview'); container.replaceChildren();
+  $('#remove-media').hidden = !editorMedia && !pendingMedia;
+  if (!editorMedia && !pendingMedia) return;
+  const kind = pendingMedia ? (pendingMedia.type === 'video/mp4' ? 'VIDEO' : 'IMAGE') : editorMedia.kind;
+  const element = document.createElement(kind === 'IMAGE' ? 'img' : 'video');
+  if (pendingMedia) { previewObjectUrl = URL.createObjectURL(pendingMedia); element.src = previewObjectUrl; }
+  else element.src = `/api/media/${encodeURIComponent(editorMedia.id)}/content`;
+  element.width = 320; element.height = 240; element.className = 'media-preview';
+  if (kind === 'IMAGE') element.alt = 'Pratinjau lampiran draft'; else { element.controls = true; element.preload = 'metadata'; }
+  container.append(element);
+}
+$('#post-media').addEventListener('change', () => {
+  const file = $('#post-media').files[0];
+  if (!file) return;
+  if (!['image/jpeg','image/png','video/mp4'].includes(file.type) || file.size > (file.type === 'video/mp4' ? 100 : 8)*1024*1024) { errorAt('#form-error','Pilih JPEG/PNG maksimal 8 MiB atau MP4 maksimal 100 MiB.'); $('#post-media').value = ''; return; }
+  pendingMedia = file; renderEditorMedia(); errorAt('#form-error','');
+});
+$('#remove-media').addEventListener('click', () => { pendingMedia = null; editorMedia = null; $('#post-media').value = ''; renderEditorMedia(); });
+async function closeEditor() {
+  if (busy) return;
+  setBusy(true);
+  try { await cleanupUnusedMedia(); $('#editor').close(); }
+  finally { setBusy(false); }
+}
+async function cleanupUnusedMedia() {
+  let success = true;
+  for (const id of uploadedMediaIds) {
+    try { await api(`/api/media/${encodeURIComponent(id)}`,{ method: 'DELETE' }); uploadedMediaIds.delete(id); }
+    catch { success = false; }
+  }
+  if (!success) errorAt('#workspace-error', 'Sebagian unggahan belum dapat dibersihkan dari penyimpanan.');
+  return success;
+}
+$('#editor').addEventListener('cancel', event => { event.preventDefault(); void closeEditor(); });
+$('#editor').addEventListener('close', () => { if (previewObjectUrl) URL.revokeObjectURL(previewObjectUrl); previewObjectUrl = null; });
 function openSchedule(post) {
   scheduling = post; $('#schedule-form').reset();
   $('#schedule-title').textContent = post.job_status === 'scheduled' ? 'Ubah jadwal' : 'Jadwalkan posting';
@@ -308,20 +356,28 @@ $('#accept-invitation-form').addEventListener('submit', async event => {
 $('#post-form').addEventListener('submit', async event => {
   event.preventDefault(); if (busy) return;
   const body = $('#post-text').value.trim();
-  if (!body) { errorAt('#form-error', 'Isi draft tidak boleh kosong.'); return; }
+  if (!body && !editorMedia && !pendingMedia) { errorAt('#form-error', 'Isi teks atau lampirkan media.'); return; }
   setBusy(true); errorAt('#form-error', '');
   try {
+    if (pendingMedia) {
+      const form = new FormData(); form.append('file',pendingMedia);
+      editorMedia = (await api('/api/media',{ method: 'POST', body: form })).media; uploadedMediaIds.add(editorMedia.id); pendingMedia = null; $('#post-media').value = ''; renderEditorMedia();
+    }
     const payload = editing ? { body, revision: editing.revision } : { body };
+    payload.mediaId = editorMedia?.id ?? null;
     if (accountsAvailable) payload.destinationAccountId = $('#post-account').value || null;
     await api(editing ? `/api/posts/${encodeURIComponent(editing.id)}` : '/api/posts', { method: editing ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+    if (editorMedia) uploadedMediaIds.delete(editorMedia.id);
+    const cleaned = await cleanupUnusedMedia();
     $('#editor').close(); await loadPosts();
+    if (!cleaned) errorAt('#workspace-error', 'Sebagian unggahan belum dapat dibersihkan dari penyimpanan.');
   } catch (error) { errorAt('#form-error', error.message); }
   finally { setBusy(false); }
 });
 $('#new-post').addEventListener('click', () => openEditor());
 $('#empty-create').addEventListener('click', () => openEditor());
-$('#close-editor').addEventListener('click', () => $('#editor').close());
-$('#cancel-editor').addEventListener('click', () => $('#editor').close());
+$('#close-editor').addEventListener('click', closeEditor);
+$('#cancel-editor').addEventListener('click', closeEditor);
 $('#filter').addEventListener('change', render);
 $('#load-more').addEventListener('click', async () => { const button = $('#load-more'); button.disabled = true; try { await loadPosts(true); } finally { button.disabled = false; } });
 for (const link of document.querySelectorAll('[data-view]')) link.addEventListener('click', () => { document.querySelectorAll('[data-view]').forEach(el => el.classList.toggle('active', el === link)); $('#filter').value = link.dataset.view; render(); });

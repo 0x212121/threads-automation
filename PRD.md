@@ -168,7 +168,7 @@ Administrator dapat melihat status layanan, jumlah job dan kegagalan agregat, se
 - **GoWhatsapp API:** pengiriman notifikasi; versi layanan, kontrak API, penerima, dan aturan pengiriman masih perlu ditentukan.
 - **OpenAPI:** API aplikasi didokumentasikan menggunakan OpenAPI untuk integrasi dengan sistem lain; autentikasi dan hak akses integrasi perlu ditetapkan.
 - **Hosting:** aplikasi di-host sendiri. Perencanaan awal mencakup empat akun Threads per pengguna, 30 posting per hari dan penyimpanan 20 GB; cakupan angka posting masih perlu ditentukan.
-- **Infrastruktur:** TypeScript pada Node.js, PostgreSQL, dan Docker Compose untuk self-hosting. Penyimpanan media, antrean/worker, secret management, monitoring, dan domain HTTPS masih perlu dirancang.
+- **Infrastruktur:** TypeScript pada Node.js, PostgreSQL, dan Docker Compose untuk self-hosting. Media disimpan pada volume Docker persisten di server yang sama; Meta mengambil media melalui URL HTTPS sementara. Pengelolaan secret, monitoring, backup dan kebijakan retensi masih perlu dirampungkan.
 
 ## 10. Risiko dan mitigasi
 
