@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { TokenVault } from './token-vault.js';
+import { threadsPostKey as postKey } from './threads-post-url.js';
 
 const permissions = ['threads_basic','threads_content_publish','threads_manage_replies','threads_read_replies'] as const;
 type Account = { id:string; username:string; threads_user_id:string; encrypted_token:Buffer; token_iv:Buffer; token_tag:Buffer };
@@ -20,13 +21,6 @@ function subcode(body:unknown): number|null {
   return typeof body.error.error_subcode==='number' && Number.isSafeInteger(body.error.error_subcode) ? body.error.error_subcode : null;
 }
 type LinkLookup = { status:string; scanned?:number; recordedIdMatches?:boolean; matchedPostReadable?:boolean; httpStatus?:number; metaCode?:number|null; metaSubcode?:number|null };
-function postKey(value:string):string|null {
-  try {
-    const url=new URL(value);
-    if (url.protocol!=='https:' || url.username || url.password || url.port || !['threads.com','www.threads.com','threads.net','www.threads.net'].includes(url.hostname)) return null;
-    return /^\/(?:@[^/]+\/post|t)\/([A-Za-z0-9_-]+)\/?$/.exec(decodeURIComponent(url.pathname))?.[1] ?? null;
-  } catch {return null;}
-}
 async function compareParentLink(request:typeof fetch, init:RequestInit, recordedId:string, link:string):Promise<LinkLookup> {
   const key=postKey(link); if (!key) return {status:'invalid_post_url'};
   let after:string|undefined,scanned=0;

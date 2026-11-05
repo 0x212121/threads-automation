@@ -18,7 +18,7 @@ test('wire PostgreSQL lokal menyimpan sesi dan draft dengan store PostgreSQL', a
   const PgStore = connectPgSimple(session);
   const store = new PgStore({ pool, tableName: 'app_sessions', createTableIfMissing: false, pruneSessionInterval: false });
   try {
-    for (const name of ['001_content.sql', '002_local_identity.sql', '003_sessions.sql', '006_password_reset.sql', '007_threads_accounts.sql','013_token_refresh.sql', '009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql']) await pool.query(await readFile(`db/migrations/${name}`, 'utf8'));
+    for (const name of ['001_content.sql', '002_local_identity.sql', '003_sessions.sql', '006_password_reset.sql', '007_threads_accounts.sql','013_token_refresh.sql', '009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql']) await pool.query(await readFile(`db/migrations/${name}`, 'utf8'));
     await bootstrapAdmin(pool, 'kata sandi untuk pengujian');
     const origin = 'http://127.0.0.1:3000';
     const app = await createApp({ pool, store, origin, secret: 'x'.repeat(48), secure: false, trustProxy: false });

@@ -79,3 +79,17 @@ docker compose exec -T app npm run check-threads-permissions -- --job UUID-PEKER
 ```
 
 `permalinkLookup` membandingkan tautan dengan daftar posting milik token, lalu memeriksa ID dari daftar tersebut. `recordedIdMatches` menunjukkan apakah ID itu sama dengan target tersimpan; `matchedPostReadable` menunjukkan apakah ID hasil pencarian dapat dibaca. Pencarian dibatasi lima halaman atau sekitar 250 posting; hasil tidak ditemukan tidak membuktikan posting tidak ada. Perintah tidak mengubah target, catatan publikasi atau isi posting. Pagination hanya memakai cursor pada host Meta yang ditetapkan, tanpa mengikuti URL respons provider.
+
+## 8. Memulihkan referensi posting pertama yang berbeda
+
+Jika `recordedIdMatches` false dan `matchedPostReadable` true, penyebab langsung sudah teridentifikasi sebagai perbedaan referensi; ini belum menjelaskan asal perbedaan tersebut. Operator dapat menggunakan pemulihan berikut setelah menerapkan migrasi terbaru:
+
+```bash
+docker compose exec -T app npm run repair-threads-parent -- --job UUID-PEKERJAAN --parent-url 'https://www.threads.com/@AKUN/post/KODE-POSTING'
+```
+
+Tanpa `--apply`, hasil `ready_to_repair` berarti akun, tautan, teks, jenis media dan waktu posting berhasil dicocokkan dengan versi yang disetujui. Waktu harus berada dalam lima menit dari keberhasilan publikasi pertama yang tercatat. Rangkaian harus berhenti pada bagian kedua, tidak mempunyai lease, dan tidak mempunyai hasil bagian berikutnya yang terbit atau belum pasti. Pemeriksaan menolak target lama yang masih dapat dibaca dan kondisi akun/pekerjaan yang berubah selama verifikasi.
+
+Untuk menerapkan koreksi, jalankan perintah yang sama dengan `--apply` di akhir. Hasil `repaired` berarti ID bagian pertama dan target balasan diperbaiki secara atomik, dengan audit ID lama/baru dan sumber tindakan operator server. Perintah tidak memanggil endpoint publikasi; pekerjaan tetap perlu tindakan. Setelah itu pilih **Lanjutkan rangkaian** melalui aplikasi. Hasil `already_correct` tidak melakukan perubahan lagi.
+
+Hasil penolakan seperti `content_mismatch`, `media_type_mismatch`, `publication_time_mismatch`, `post_not_verified`, atau `not_repairable` berarti koreksi tidak diterapkan. Periksa bahwa tautan menunjuk bagian pertama yang benar; jangan mengganti ID dengan SQL berdasarkan dugaan. Kehilangan catatan waktu keberhasilan atau posting yang tidak ditemukan dalam rentang pencarian juga dapat membuat verifikasi tidak selesai. Migrasi menambahkan pencatatan ID kontainer dan ID respons Meta untuk publikasi baru; ID sumber lama yang belum tercatat tetap tidak diketahui.

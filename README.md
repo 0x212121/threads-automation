@@ -75,6 +75,8 @@ Worker mencatat percobaan dan hanya mencoba ulang kegagalan sementara yang aman 
 
 Antarbagian rangkaian diberi jeda aplikasi 30 detik. Sebelum membuat balasan, worker memeriksa akses ke ID bagian sebelumnya. Penolakan 24/4279009 pada tahap tersebut dicoba ulang secara terbatas sebelum tenggat; tidak ada pengiriman ulang otomatis setelah hasil publikasi tidak pasti. Jika perlu, jalankan `docker compose exec -T app npm run check-threads-permissions -- --job UUID-PEKERJAAN` untuk memeriksa identitas dan akses target tanpa menampilkan token atau isi posting.
 
+Jika hasil pencocokan permalink membuktikan ID bagian pertama berbeda, tersedia pemulihan referensi melalui terminal server dengan verifikasi dan audit, tanpa menerbitkan ulang posting. Ikuti [prosedur pemulihan referensi](docs/META_APP_SETUP.md#8-memulihkan-referensi-posting-pertama-yang-berbeda); terapkan migrasi terbaru sebelum menjalankannya.
+
 Jika konfigurasi Threads tersedia, proses aplikasi memeriksa token secara otomatis setiap 15 menit. Token yang masih berlaku dan berjarak maksimal 14 hari dari kedaluwarsa diperbarui, dengan jeda dan percobaan ulang untuk gangguan sementara. Jika Meta menolak token, atau token terlanjur kedaluwarsa, admin perlu menghubungkan ulang akun. Jadwal baru masih dibatasi sebelum waktu kedaluwarsa token yang saat ini tersimpan; penjadwalan tidak mengasumsikan refresh pasti berhasil.
 
 Untuk instalasi Compose yang sudah ada, backup database dan volume media terlebih dahulu. Tunggu sampai tidak ada publikasi yang sedang diproses, lalu hentikan semua instance aplikasi lama agar worker lama tidak mengambil pekerjaan bermedia. Ambil kode baru dan jalankan:

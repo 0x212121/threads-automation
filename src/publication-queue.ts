@@ -88,7 +88,7 @@ export class PublicationQueue {
       if (existing.rowCount) return false;
       const updated = await client.query("UPDATE publication_jobs j SET status='publishing',updated_at=now() WHERE j.id=$1 AND j.lease_token=$2 AND j.status='prepared' AND j.lease_until>now() AND j.scheduled_at + interval '1 hour'>now() AND EXISTS (SELECT 1 FROM content_posts p JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version JOIN threads_accounts a ON a.id=v.destination_account_id JOIN local_users u ON u.id=j.requested_by WHERE p.id=j.post_id AND p.status='approved' AND p.current_version=j.content_version AND v.destination_account_id=j.account_id AND a.status='active' AND a.token_expires_at>now() AND u.disabled_at IS NULL AND u.email_verified_at IS NOT NULL AND (p.created_by=u.id OR u.role IN ('admin','reviewer')) AND EXISTS (SELECT 1 FROM content_reviews r WHERE r.post_id=p.id AND r.content_version=p.current_version AND r.decision='approved')) RETURNING j.id", [jobId, lease]);
       if (!updated.rowCount) return false;
-      await client.query("INSERT INTO publication_parts(job_id,position,status) SELECT id,part_index,'publishing' FROM publication_jobs WHERE id=$1 ON CONFLICT (job_id,position) DO UPDATE SET status='publishing',published_id=NULL WHERE publication_parts.status='not_published'",[jobId]);
+      await client.query("INSERT INTO publication_parts(job_id,position,status,container_id) SELECT id,part_index,'publishing',container_id FROM publication_jobs WHERE id=$1 ON CONFLICT (job_id,position) DO UPDATE SET status='publishing',published_id=NULL,provider_response_id=NULL,container_id=EXCLUDED.container_id WHERE publication_parts.status='not_published'",[jobId]);
       await client.query("INSERT INTO publication_attempts (id,job_id,stage,outcome) VALUES ($1,$2,'publish','started')", [randomUUID(), jobId]);
       return true;
     });
@@ -103,7 +103,7 @@ export class PublicationQueue {
     return this.transaction(async client => {
       const locked = await client.query<{post_id:string;content_version:number;part_index:number}>("SELECT post_id,content_version,part_index FROM publication_jobs WHERE id=$1 AND lease_token=$2 AND status='publishing' FOR UPDATE",[jobId,lease]);
       const job=locked.rows[0]; if (!job) return false;
-      await client.query('UPDATE publication_parts SET status=$3,published_id=$4 WHERE job_id=$1 AND position=$2',[jobId,job.part_index,status,publishedId]);
+      await client.query("UPDATE publication_parts SET status=$3,published_id=$4,provider_response_id=CASE WHEN $3='published' THEN $4 ELSE provider_response_id END WHERE job_id=$1 AND position=$2",[jobId,job.part_index,status,publishedId]);
       const next = status === 'published' ? await client.query('SELECT position FROM content_version_replies WHERE post_id=$1 AND version=$2 AND position=$3',[job.post_id,job.content_version,job.part_index+1]) : null;
       if (next?.rowCount) await client.query("UPDATE publication_jobs SET status='preparing',part_index=part_index+1,reply_to_id=$2,container_id=NULL,next_attempt_at=now()+interval '30 seconds',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1",[jobId,publishedId]);
       else await client.query("UPDATE publication_jobs SET status=$2,published_id=CASE WHEN $2='published' THEN (SELECT published_id FROM publication_parts WHERE job_id=$1 AND position=0) ELSE NULL END,lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=$1",[jobId,status]);

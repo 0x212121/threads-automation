@@ -1,0 +1,85 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+import type { Pool } from 'pg';
+import { TokenVault } from '../src/token-vault.js';
+import { ContentStore } from '../src/content-store.js';
+import { PublicationQueue } from '../src/publication-queue.js';
+import { PublicationRequests } from '../src/publication-requests.js';
+import { ThreadsPublisher } from '../src/threads-publisher.js';
+import { processPublication } from '../src/publication-worker.js';
+import { repairFirstReplyTarget } from '../src/threads-reference-repair.js';
+
+test('pemulihan ID memakai permalink terverifikasi, menolak kondisi tidak aman dan tidak mengulang posting pertama',async()=>{
+  const db=new PGlite();
+  try {
+    for (const file of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql','010_publication_resolutions.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql']) await db.exec(await readFile(`db/migrations/${file}`,'utf8'));
+    const query=async(sql:string,params?:unknown[])=>{const r=await db.query(sql,params);return {...r,rowCount:r.rows.length || r.affectedRows || 0};};
+    const pool={query,connect:async()=>({query,release:()=>{}})} as unknown as Pool;
+    const user='11111111-1111-4111-8111-111111111111',account='22222222-2222-4222-8222-222222222222';
+    const vault=new TokenVault(Buffer.alloc(32,6)),sealed=vault.seal('token-rahasia',`${account}:123`);
+    await query("INSERT INTO local_users(id,email,password_hash,role,email_verified_at) VALUES ($1,'admin@example.test','hash','admin',now())",[user]);
+    await query("INSERT INTO threads_accounts(id,threads_user_id,username,connected_by,encrypted_token,token_iv,token_tag,token_expires_at,status) VALUES ($1,'123','tester',$2,$3,$4,$5,now()+interval '1 day','active')",[account,user,sealed.ciphertext,sealed.iv,sealed.tag]);
+    const actor={id:user,role:'admin'} as const, content=new ContentStore(pool),requests=new PublicationRequests(pool),queue=new PublicationQueue(pool);
+    const post=await content.create(actor,{body:'Approved root',replies:['Approved reply'],destinationAccountId:account});
+    await content.transition(actor,post.id,1,'submit');await content.transition(actor,post.id,2,'approve');
+    const job=await requests.publishNow(user,post.id,3,'UTC');
+    const oldId='18000000000000007',correctId='18000000000000009',containerId='18000000000000001';
+    const publisher=new ThreadsPublisher((async(input:string|URL|Request)=>Response.json({id:new URL(String(input)).pathname==='/me/threads' ? containerId : oldId})) as typeof fetch);
+    await processPublication(queue,vault,publisher);
+    await query("UPDATE publication_jobs SET status='needs_action' WHERE id=$1",[job.id]);
+    const permalink='https://www.threads.com/@tester/post/Original';
+    const provider={id:correctId,permalink,text:'Approved root',timestamp:new Date().toISOString(),username:'tester',media_type:'TEXT_POST'};
+    let conflict=false, reconnect=false, oldReadable=false;
+    const fetcher=(async(input:string|URL|Request,init?:RequestInit)=>{
+      assert.equal(init?.method,undefined);assert.equal(new Headers(init?.headers).get('authorization'),'Bearer token-rahasia');
+      const url=new URL(String(input));assert.equal(url.origin,'https://graph.threads.net');
+      if (url.pathname==='/me') return Response.json({id:'123',username:'tester'});
+      if (url.pathname==='/me/threads') return Response.json({data:[provider]});
+      if (url.pathname===`/${correctId}`) return Response.json(provider);
+      assert.equal(url.pathname,`/${oldId}`);
+      if (conflict) await query("UPDATE publication_jobs SET status='scheduled' WHERE id=$1",[job.id]);
+      if (reconnect) {const next=vault.seal('new-token-rahasia',`${account}:123`);await query('UPDATE threads_accounts SET encrypted_token=$2,token_iv=$3,token_tag=$4 WHERE id=$1',[account,next.ciphertext,next.iv,next.tag]);}
+      if (oldReadable) return Response.json({id:oldId});
+      return Response.json({error:{code:100,error_subcode:33,message:'token-rahasia'}},{status:400});
+    }) as typeof fetch;
+    assert.deepEqual(await repairFirstReplyTarget(pool,vault,job.id,permalink,false,fetcher),{status:'ready_to_repair',part:2});
+    assert.equal((await db.query('SELECT * FROM publication_reference_repairs')).rows.length,0);
+    provider.text='Different';assert.equal((await repairFirstReplyTarget(pool,vault,job.id,permalink,true,fetcher)).status,'content_mismatch');provider.text='Approved root';
+    const timestamp=provider.timestamp;provider.timestamp='2000-01-01T00:00:00Z';assert.equal((await repairFirstReplyTarget(pool,vault,job.id,permalink,true,fetcher)).status,'publication_time_mismatch');provider.timestamp=timestamp;
+    provider.media_type='VIDEO';assert.equal((await repairFirstReplyTarget(pool,vault,job.id,permalink,true,fetcher)).status,'media_type_mismatch');provider.media_type='TEXT_POST';
+    provider.username='other';assert.equal((await repairFirstReplyTarget(pool,vault,job.id,permalink,true,fetcher)).status,'post_not_verified');provider.username='tester';
+    oldReadable=true;assert.equal((await repairFirstReplyTarget(pool,vault,job.id,permalink,true,fetcher)).status,'recorded_target_still_readable');oldReadable=false;
+    await query("UPDATE publication_jobs SET status='uncertain' WHERE id=$1",[job.id]);
+    assert.equal((await repairFirstReplyTarget(pool,vault,job.id,permalink,true,fetcher)).status,'not_repairable');
+    await query("UPDATE publication_jobs SET status='needs_action' WHERE id=$1",[job.id]);
+    await query("INSERT INTO publication_parts(job_id,position,status) VALUES ($1,1,'uncertain')",[job.id]);
+    assert.equal((await repairFirstReplyTarget(pool,vault,job.id,permalink,true,fetcher)).status,'not_repairable');
+    await query('DELETE FROM publication_parts WHERE job_id=$1 AND position=1',[job.id]);
+    conflict=true;assert.equal((await repairFirstReplyTarget(pool,vault,job.id,permalink,true,fetcher)).status,'state_changed');conflict=false;
+    assert.equal((await db.query('SELECT * FROM publication_reference_repairs')).rows.length,0);
+    await query("UPDATE publication_jobs SET status='needs_action' WHERE id=$1",[job.id]);
+    reconnect=true;assert.equal((await repairFirstReplyTarget(pool,vault,job.id,permalink,true,fetcher)).status,'state_changed');reconnect=false;
+    await query('UPDATE threads_accounts SET encrypted_token=$2,token_iv=$3,token_tag=$4 WHERE id=$1',[account,sealed.ciphertext,sealed.iv,sealed.tag]);
+    const result=await repairFirstReplyTarget(pool,vault,job.id,permalink+'?tracking=1',true,fetcher);
+    assert.deepEqual(result,{status:'repaired',part:2});assert.doesNotMatch(JSON.stringify(result),/rahasia|Approved/);
+    const root=(await db.query<{published_id:string;provider_response_id:string;container_id:string}>('SELECT published_id,provider_response_id,container_id FROM publication_parts WHERE job_id=$1 AND position=0',[job.id])).rows[0];
+    assert.deepEqual(root,{published_id:correctId,provider_response_id:oldId,container_id:containerId});
+    const audit=(await db.query<{previous_id:string;corrected_id:string;verified_permalink:string}>('SELECT previous_id,corrected_id,verified_permalink FROM publication_reference_repairs WHERE job_id=$1',[job.id])).rows[0];
+    assert.deepEqual(audit,{previous_id:oldId,corrected_id:correctId,verified_permalink:permalink});
+    assert.equal((await db.query<{status:string}>('SELECT status FROM publication_jobs WHERE id=$1',[job.id])).rows[0]?.status,'needs_action');
+    assert.equal((await repairFirstReplyTarget(pool,vault,job.id,permalink,true,fetcher)).status,'already_correct');
+    assert.equal((await db.query('SELECT * FROM publication_reference_repairs')).rows.length,1);
+    await requests.resume(user,post.id,3,job.id);
+    let replyCreates=0;
+    const next=new ThreadsPublisher((async(input:string|URL|Request)=>{
+      const url=new URL(String(input));
+      if (url.pathname===`/${correctId}`) return Response.json({id:correctId});
+      if (url.pathname==='/me/threads') {replyCreates++;assert.equal(url.searchParams.get('reply_to_id'),correctId);assert.equal(url.searchParams.get('text'),'Approved reply');return Response.json({id:'18000000000000011'});}
+      assert.equal(url.pathname,'/me/threads_publish');return Response.json({id:'18000000000000013'});
+    }) as typeof fetch);
+    await processPublication(queue,vault,next);
+    assert.equal(replyCreates,1);assert.equal((await db.query<{status:string}>('SELECT status FROM publication_jobs WHERE id=$1',[job.id])).rows[0]?.status,'published');
+  } finally {await db.close();}
+});

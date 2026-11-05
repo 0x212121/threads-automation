@@ -117,6 +117,7 @@ Pengiriman email transaksional untuk verifikasi dan reset adalah dependensi MVP.
 - Worker mengambil pekerjaan secara atomik dengan lease dan pemulihan saat proses terhenti. Pembatalan/perubahan hanya dijamin sebelum pekerjaan diklaim; UI memberi tahu bila sudah diproses.
 - Kegagalan sementara yang diketahui aman untuk diulang memakai retry terbatas dan backoff. Kegagalan permanen, izin tidak memadai, atau token kedaluwarsa masuk **Gagal** atau **Perlu tindakan**, dengan pesan yang dapat ditindaklanjuti.
 - Jika respons publikasi hilang atau timeout setelah permintaan dikirim, jangan otomatis menerbitkan ulang. Lakukan rekonsiliasi menggunakan kemampuan API yang tersedia; jika hasil tetap tidak pasti, tampilkan **Hasil belum pasti** dan minta pengguna memeriksa Threads sebelum mengulang secara manual. Pencegahan duplikasi dilakukan semaksimal mungkin, bukan jaminan exactly-once.
+- Referensi ke posting yang sudah terbit dapat dipulihkan melalui prosedur operator yang memverifikasi posting tersebut dan mencatat perubahan. Pemulihan referensi tidak menerbitkan ulang konten atau melewati persetujuan.
 - Catat waktu jadwal, setiap percobaan, hasil, dan alasan yang aman ditampilkan. Percobaan otomatis tidak dimulai setelah satu jam dari waktu jadwal; pekerjaan yang belum dikirim setelah tenggat ditandai **Perlu tindakan**. Hasil penerbitan yang sudah dikirim tetap direkonsiliasi.
 
 ### 6.5 Dashboard, kalender, dan notifikasi

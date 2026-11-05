@@ -12,7 +12,7 @@ import type { MediaStore } from '../src/media-store.js';
 
 test('carousel mengunci urutan gambar pada versi yang disetujui dan hanya menerbitkan induk satu kali', async () => {
   const db = new PGlite();
-  for (const name of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql']) await db.exec(await readFile(`db/migrations/${name}`,'utf8'));
+  for (const name of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql']) await db.exec(await readFile(`db/migrations/${name}`,'utf8'));
   const query = async (sql:string, params?:unknown[]) => { const result=await db.query(sql,params); return {...result,rowCount:result.affectedRows ?? result.rows.length}; };
   const pool={query,connect:async()=>({query,release:()=>{}})} as unknown as Pool;
   const owner='11111111-1111-4111-8111-111111111111', other='22222222-2222-4222-8222-222222222222', account='33333333-3333-4333-8333-333333333333';

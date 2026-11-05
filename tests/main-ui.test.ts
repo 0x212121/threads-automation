@@ -16,7 +16,7 @@ async function waitFor(predicate: () => boolean) {
 
 test('antarmuka utama login, menyimpan draft di server dan menyetujuinya', async () => {
   const db = new PGlite();
-  for (const migration of ['001_content.sql', '002_local_identity.sql', '006_password_reset.sql', '007_threads_accounts.sql','013_token_refresh.sql', '009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql', '010_publication_resolutions.sql']) await db.exec(await readFile(`db/migrations/${migration}`, 'utf8'));
+  for (const migration of ['001_content.sql', '002_local_identity.sql', '006_password_reset.sql', '007_threads_accounts.sql','013_token_refresh.sql', '009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql', '010_publication_resolutions.sql']) await db.exec(await readFile(`db/migrations/${migration}`, 'utf8'));
   const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.rows.length }; };
   const pool = { query, connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
   await bootstrapAdmin(pool, 'kata sandi untuk pengujian');
