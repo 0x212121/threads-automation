@@ -19,9 +19,45 @@ function subcode(body:unknown): number|null {
   if (!body || typeof body!=='object' || !('error' in body) || !body.error || typeof body.error!=='object' || !('error_subcode' in body.error)) return null;
   return typeof body.error.error_subcode==='number' && Number.isSafeInteger(body.error.error_subcode) ? body.error.error_subcode : null;
 }
+type LinkLookup = { status:string; scanned?:number; recordedIdMatches?:boolean; matchedPostReadable?:boolean; httpStatus?:number; metaCode?:number|null; metaSubcode?:number|null };
+function postKey(value:string):string|null {
+  try {
+    const url=new URL(value);
+    if (url.protocol!=='https:' || url.username || url.password || url.port || !['threads.com','www.threads.com','threads.net','www.threads.net'].includes(url.hostname)) return null;
+    return /^\/(?:@[^/]+\/post|t)\/([A-Za-z0-9_-]+)\/?$/.exec(decodeURIComponent(url.pathname))?.[1] ?? null;
+  } catch {return null;}
+}
+async function compareParentLink(request:typeof fetch, init:RequestInit, recordedId:string, link:string):Promise<LinkLookup> {
+  const key=postKey(link); if (!key) return {status:'invalid_post_url'};
+  let after:string|undefined,scanned=0;
+  const cursors=new Set<string>();
+  for (let page=0;page<5;page++) {
+    const url=new URL('https://graph.threads.net/me/threads');
+    url.search=new URLSearchParams({fields:'id,permalink',limit:'50',...(after ? {after} : {})}).toString();
+    const response=await requestJson(request,url,init);
+    if (response.status<200 || response.status>=300) return {status:'listing_failed',scanned,httpStatus:response.status,metaCode:code(response.body),metaSubcode:subcode(response.body)};
+    if (!response.body || typeof response.body!=='object' || !('data' in response.body) || !Array.isArray(response.body.data)) return {status:'listing_unexpected',scanned};
+    const items=response.body.data; scanned+=items.length;
+    const matches=items.filter((item:unknown):item is {id:string;permalink:string}=>!!item && typeof item==='object' && 'id' in item && typeof item.id==='string' && /^[0-9]{1,30}$/.test(item.id) && 'permalink' in item && typeof item.permalink==='string' && postKey(item.permalink)===key);
+    if (matches.length>1) return {status:'ambiguous',scanned};
+    if (matches[0]) {
+      const target=new URL(`https://graph.threads.net/${matches[0].id}`); target.searchParams.set('fields','id');
+      const read=await requestJson(request,target,init);
+      const matchedPostReadable=read.status>=200 && read.status<300 && !!read.body && typeof read.body==='object' && 'id' in read.body && read.body.id===matches[0].id;
+      return {status:'matched',scanned,recordedIdMatches:recordedId===matches[0].id,matchedPostReadable,httpStatus:read.status,metaCode:code(read.body),metaSubcode:subcode(read.body)};
+    }
+    const paging='paging' in response.body ? response.body.paging : null;
+    const cursor=paging && typeof paging==='object' && 'cursors' in paging ? paging.cursors : null;
+    const next=cursor && typeof cursor==='object' && 'after' in cursor ? cursor.after : null;
+    if (!items.length || typeof next!=='string' || !next || next.length>2048 || cursors.has(next)) return {status:'not_found_in_scanned_posts',scanned};
+    cursors.add(next); after=next;
+  }
+  return {status:'not_found_in_scanned_posts',scanned};
+}
 
-export async function diagnoseReplyTarget(pool: Pool, vault: TokenVault, jobId:string, request:typeof fetch=fetch): Promise<{status:string;part?:number;jobStatus?:string;parentMatchesHistory?:boolean;identityMatches?:boolean;parentReadable?:boolean;httpStatus?:number;metaCode?:number|null;metaSubcode?:number|null}> {
+export async function diagnoseReplyTarget(pool: Pool, vault: TokenVault, jobId:string, request:typeof fetch=fetch, parentUrl?:string): Promise<{status:string;part?:number;jobStatus?:string;parentMatchesHistory?:boolean;identityMatches?:boolean;parentReadable?:boolean;httpStatus?:number;metaCode?:number|null;metaSubcode?:number|null;permalinkLookup?:LinkLookup}> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) return {status:'invalid_job'};
+  if (parentUrl!==undefined && !postKey(parentUrl)) return {status:'invalid_post_url'};
   try {
     const result=await pool.query<Omit<Account,'id'> & {account_id:string;part_index:number;job_status:string;reply_to_id:string|null;previous_published_id:string|null}>(`SELECT a.id AS account_id,a.username,a.threads_user_id,a.encrypted_token,a.token_iv,a.token_tag,
       j.part_index,j.status AS job_status,j.reply_to_id,pp.published_id AS previous_published_id
@@ -41,7 +77,8 @@ export async function diagnoseReplyTarget(pool: Pool, vault: TokenVault, jobId:s
     const url=new URL(`https://graph.threads.net/${row.reply_to_id}`); url.searchParams.set('fields','id');
     const target=await requestJson(request,url,init);
     const parentReadable=target.status>=200 && target.status<300 && !!target.body && typeof target.body==='object' && 'id' in target.body && target.body.id===row.reply_to_id;
-    return {status:'ok',...summary,identityMatches,parentReadable,httpStatus:target.status,metaCode:code(target.body),metaSubcode:subcode(target.body)};
+    const permalinkLookup=parentUrl ? await compareParentLink(request,init,row.reply_to_id,parentUrl) : undefined;
+    return {status:'ok',...summary,identityMatches,parentReadable,httpStatus:target.status,metaCode:code(target.body),metaSubcode:subcode(target.body),...(permalinkLookup ? {permalinkLookup} : {})};
   } catch {return {status:'diagnostic_unavailable'};}
 }
 

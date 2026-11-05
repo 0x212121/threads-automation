@@ -74,6 +74,8 @@ Setelah bagian rangkaian berhasil diterbitkan, antrean memberi jeda aplikasi 30 
 
 Pemeriksaan server dapat ditujukan ke ID pekerjaan untuk membandingkan target balasan dengan ID bagian sebelumnya yang disimpan, memeriksa identitas token melalui Meta, dan membaca target tanpa menampilkan ID provider, isi konten, atau kredensial. Status diagnostik tidak mengubah pekerjaan dan tidak menerbitkan konten.
 
+Jika diberi tautan publik target, pemeriksaan membandingkan permalink dengan daftar posting akun (maksimal lima halaman), kemudian membaca ID yang ditemukan. Perbandingan hanya diagnostik; hasil tidak ditemukan tidak dianggap bukti penghapusan dan ID tersimpan tidak diganti otomatis.
+
 Pembacaan respons mempertahankan ID numerik besar sebagai teks dari sumber JSON asli pada Node.js 24. Kegagalan callback dikembalikan sebagai tahap terbatas (sesi, penolakan, pertukaran kode, token jangka panjang, profil, atau penyimpanan), dengan kode Meta numerik jika tersedia. Log hanya mencatat event, tahap, status HTTP, kode/subkode Meta dan kategori terbatas, tanpa pesan mentah, URL permintaan, kode otorisasi atau token. State tetap sekali pakai meskipun pertukaran gagal; pengguna harus memulai koneksi baru.
 
 Pertukaran token jangka panjang mengikuti contoh resmi Meta: server mengirim GET `/access_token` dengan `grant_type=th_exchange_token`, `client_secret`, dan token sementara pada parameter `access_token`. URL berkredensial ini hanya dibuat di server dan tidak ditampilkan atau dicatat dalam log, termasuk saat transport gagal.

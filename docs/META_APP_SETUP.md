@@ -71,3 +71,11 @@ docker compose exec -T app npm run check-threads-permissions -- --job UUID-PEKER
 ```
 
 Bagian `publication` memuat `parentMatchesHistory` (target sesuai catatan bagian sebelumnya), `identityMatches` (token masih untuk identitas akun tersimpan), dan `parentReadable` (target berhasil dibaca lewat Meta), beserta status HTTP/kode Meta jika ada. Hasil ini tidak menampilkan isi posting atau ID Meta, serta tidak melakukan publikasi. Jika `parentReadable` tetap false, periksa keberadaan bagian sebelumnya pada Threads dan akses akun; jangan mengganti target atau mengulang seluruh rangkaian berdasarkan dugaan. Log persiapan menyertakan `operation` agar pemeriksaan target dapat dibedakan dari pembuatan kontainer, dan `retryable` menunjukkan keputusan retry aplikasi.
+
+Jika posting sebelumnya masih terlihat di web tetapi pembacaan ID ditolak, tambahkan tautan publik posting tersebut sebagai pembanding:
+
+```bash
+docker compose exec -T app npm run check-threads-permissions -- --job UUID-PEKERJAAN --parent-url 'https://www.threads.com/@AKUN/post/KODE-POSTING'
+```
+
+`permalinkLookup` membandingkan tautan dengan daftar posting milik token, lalu memeriksa ID dari daftar tersebut. `recordedIdMatches` menunjukkan apakah ID itu sama dengan target tersimpan; `matchedPostReadable` menunjukkan apakah ID hasil pencarian dapat dibaca. Pencarian dibatasi lima halaman atau sekitar 250 posting; hasil tidak ditemukan tidak membuktikan posting tidak ada. Perintah tidak mengubah target, catatan publikasi atau isi posting. Pagination hanya memakai cursor pada host Meta yang ditetapkan, tanpa mengikuti URL respons provider.
