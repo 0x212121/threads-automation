@@ -1,0 +1,37 @@
+/* Lists retain the editorial rhythm; calendar cells express dates, not decorative cards. */
+.workspace-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:26px 0 16px}
+.team-invite{margin:12px 0}
+.section-heading>button{flex-shrink:0}
+.side-caption,.breadcrumb span,footer{color:#706961}
+.workspace-tabs [aria-current="page"]{background:#eaded1;border-color:#9b6b53;color:#703e2a}
+.content-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding:18px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.content-filters label,.calendar-controls label{font-size:12px;font-weight:700;margin:0;min-width:0}
+.content-filters select,.content-filters input{display:block;width:100%;margin-top:8px;min-width:0}
+.filter-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:end;grid-column:1/-1}
+.calendar-controls{display:flex;align-items:end;gap:8px;flex-wrap:wrap}
+.calendar-controls input{display:block;margin-top:8px;max-width:180px}
+.calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;border:1px solid var(--line);background:var(--line);margin:20px 0}
+.calendar-weekday{background:#f0ede6;padding:10px 6px;font-size:11px;font-weight:700;text-align:center}
+.calendar-spacer{background:#f0ede6}
+.calendar-day{min-width:0;min-height:125px;padding:8px;background:#fbfaf7}
+.calendar-day h3{margin:0 0 8px;font:normal 20px Georgia,serif}
+.calendar-entry{display:block;width:100%;border:0;border-top:1px solid #d9c8b8;background:#eee5da;text-align:left;padding:10px 6px;min-height:44px;color:#593e2e;font-size:11px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+.calendar-entry:hover{background:#e5d5c4}
+.management-list{border-top:1px solid var(--line);margin:20px 0}
+.management-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:18px 0;border-bottom:1px solid var(--line)}
+.management-row h3{font-size:14px;margin:0;overflow-wrap:anywhere;flex:1 1 210px;min-width:0}
+.management-row label{display:flex;align-items:center;gap:8px;font-size:12px}
+.management-row p{margin:0;flex:1 1 230px;overflow-wrap:anywhere;min-width:0}
+.management-row .permission-details{flex-basis:100%;font-size:12px;line-height:1.7}
+.history-content{padding:27px;min-width:0}
+#history-dialog{width:min(800px,calc(100% - 32px))}
+.history-entry{border-bottom:1px solid var(--line);padding:16px 0;overflow-wrap:anywhere}
+.history-entry h4{font-size:13px;line-height:1.6;margin:0 0 8px}
+.history-body{white-space:pre-wrap;font-size:13px;line-height:1.7}
+.history-entry a{display:inline-flex;align-items:center;min-height:44px;padding-right:18px;color:#8c482e}
+.event-list{padding-left:24px}
+.field-help[role="status"]{min-height:18px}
+.secondary:disabled,.text-button:disabled,.calendar-entry:disabled{opacity:.55;cursor:not-allowed}
+.management-row select{max-width:100%}
+@media(max-width:950px){.content-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.calendar-grid{grid-template-columns:repeat(7,minmax(0,1fr))}.calendar-day{padding:5px}}
+@media(max-width:640px){.content-filters{grid-template-columns:1fr}.calendar-grid{display:block;background:none}.calendar-weekday,.calendar-spacer{display:none}.calendar-day{border-bottom:1px solid var(--line);padding:12px;min-height:60px}.calendar-day h3{font-size:18px}.calendar-controls{align-items:center}.management-row{align-items:start}.management-row h3,.management-row p{flex-basis:100%}.management-row label{flex-wrap:wrap}.workspace-tabs button{flex:1 1 auto}.history-content{padding:20px}}

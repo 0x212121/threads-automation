@@ -70,6 +70,8 @@ Status awal: perencanaan. Kotak belum dicentang bukan klaim bahwa pekerjaan suda
 
 ## 5. API dan kesiapan rilis
 
+- [x] Terapkan permintaan fitur 1/2/4/5/6: daftar/ubah peran/nonaktif/aktif anggota, pencabutan undangan, kalender/filter server, status/izin/pemutusan lokal akun Threads, hapus draft oleh pembuat, serta riwayat dan audit (migrasi 018). Uji API untuk akses, CSRF, pencabutan sesi, admin terakhir, revisi, tanggal/zona dan pelestarian hasil publikasi; uji browser dengan data sintetis pada desktop/ponsel. Validasi deployment dan Meta/SMTP nyata untuk fitur baru tetap diperlukan.
+
 - [ ] Tetapkan kontrak API integrasi, hak, autentikasi, idempotensi, versi, error dan dokumentasi OpenAPI yang tervalidasi.
 - [ ] Uji end-to-end alur tim, persetujuan, akun dan publikasi; uji batas akses UI dan API mesin.
 - [ ] Uji restart, timeout, persaingan worker, tenggat, zona waktu, token kedaluwarsa dan kegagalan notifikasi.

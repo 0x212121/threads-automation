@@ -131,7 +131,9 @@ Pengiriman email transaksional untuk verifikasi dan reset adalah dependensi MVP.
 
 ### 6.6 Administrasi
 
-Administrator dapat melihat status layanan, jumlah job dan kegagalan agregat, serta menonaktifkan akses pengguna. Aktivitas administratif dan perubahan koneksi dicatat. Akses administrator terhadap isi konten pengguna tidak diasumsikan; kebutuhan dan kebijakannya harus diputuskan sebelum diimplementasikan. Menonaktifkan pengguna menghentikan job yang belum diklaim; job yang telah dikirim ditangani melalui rekonsiliasi.
+Administrator dapat melihat status layanan, jumlah job dan kegagalan agregat, serta menonaktifkan akses pengguna. Aktivitas administratif dan perubahan koneksi dicatat. Dalam tim bersama, admin mengikuti hak baca konten yang sama dengan anggota aktif; audit administratif hanya dapat dibaca admin terverifikasi. Menonaktifkan pengguna menghentikan job yang belum diklaim; job yang telah dikirim ditangani melalui rekonsiliasi.
+
+Permintaan pengembangan 6 November 2026 menetapkan pengelolaan anggota melalui UI bagi admin terverifikasi, termasuk perubahan peran, nonaktif/aktif dan pencabutan undangan. Satu admin aktif terverifikasi harus tetap tersedia. Seluruh anggota aktif dapat membaca riwayat versi dan publikasi konten tim; audit administratif hanya untuk admin terverifikasi. Penghapusan draft dilakukan pembuat untuk draft/ditolak yang tidak sedang atau sudah diterbitkan, dengan penyimpanan riwayat untuk retensi. Pemutusan akun Threads menghapus koneksi/token lokal; pencabutan izin pada Meta dilakukan melalui pengaturan akun Threads.
 
 ### 6.7 Tim dan persetujuan
 

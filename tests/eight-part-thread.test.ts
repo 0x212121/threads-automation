@@ -14,7 +14,7 @@ import { diagnoseReplyTarget } from '../src/threads-token-diagnostic.js';
 for (const stopAtThird of [false,true]) test(stopAtThird ? 'penolakan publikasi bagian ketiga dicatat dan menghentikan rangkaian tanpa mengulang bagian sebelumnya' : 'delapan bagian menunggu kontainer siap, memakai ID publikasi sebelumnya dan pulih setelah restart worker',async()=>{
   const db=new PGlite();
   try {
-    for (const file of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql','010_publication_resolutions.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql','017_publication_failure_details.sql']) await db.exec(await readFile(`db/migrations/${file}`,'utf8'));
+    for (const file of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql','010_publication_resolutions.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql','017_publication_failure_details.sql','018_workspace_management.sql']) await db.exec(await readFile(`db/migrations/${file}`,'utf8'));
     const query=async(sql:string,params?:unknown[])=>{const r=await db.query(sql,params);return {...r,rowCount:r.rows.length || r.affectedRows || 0};};
     const pool={query,connect:async()=>({query,release:()=>{}})} as unknown as Pool;
     const user='11111111-1111-4111-8111-111111111111',account='22222222-2222-4222-8222-222222222222',vault=new TokenVault(Buffer.alloc(32,7)),sealed=vault.seal('token-test',`${account}:123`);

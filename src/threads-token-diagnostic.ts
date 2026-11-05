@@ -91,14 +91,15 @@ export async function diagnoseReplyTarget(pool: Pool, vault: TokenVault, jobId:s
 }
 
 // Only fixed scope names and sanitized status information leave this function.
-export async function diagnoseThreadsTokens(pool: Pool, vault: TokenVault, appId:string, appSecret:string, request:typeof fetch = fetch): Promise<{status:string; httpStatus?:number; metaCode?:number|null; accounts?:Result[]}> {
+export async function diagnoseThreadsTokens(pool: Pool, vault: TokenVault, appId:string, appSecret:string, request:typeof fetch = fetch, accountId?:string): Promise<{status:string; httpStatus?:number; metaCode?:number|null; accounts?:Result[]}> {
   if (!/^[0-9]+$/.test(appId) || !appSecret) return {status:'invalid_configuration'};
+  if (accountId!==undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(accountId)) return {status:'invalid_account'};
   try {
     const appUrl=new URL('https://graph.threads.net/oauth/access_token');
     appUrl.search=new URLSearchParams({grant_type:'client_credentials',client_id:appId,client_secret:appSecret}).toString();
     const app=await requestJson(request,appUrl);
     if (app.status<200 || app.status>=300 || !app.body || typeof app.body!=='object' || !('access_token' in app.body) || typeof app.body.access_token!=='string' || !app.body.access_token) return {status:'app_token_failed',httpStatus:app.status,metaCode:code(app.body)};
-    const result=await pool.query<Account>("SELECT id,username,threads_user_id,encrypted_token,token_iv,token_tag FROM threads_accounts WHERE status='active' ORDER BY username,id");
+    const result=accountId ? await pool.query<Account>("SELECT id,username,threads_user_id,encrypted_token,token_iv,token_tag FROM threads_accounts WHERE status='active' AND id=$1",[accountId]) : await pool.query<Account>("SELECT id,username,threads_user_id,encrypted_token,token_iv,token_tag FROM threads_accounts WHERE status='active' ORDER BY username,id");
     const accounts:Result[]=[];
     for (const account of result.rows) {
       try {

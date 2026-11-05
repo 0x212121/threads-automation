@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
 import { TokenVault } from './token-vault.js';
+import { recordAudit } from './audit.js';
 
 export class ThreadsAccountError extends Error {}
 
@@ -22,6 +23,7 @@ export class ThreadsAccounts {
       } else {
         await client.query("INSERT INTO threads_accounts (id,threads_user_id,username,connected_by,encrypted_token,token_iv,token_tag,token_expires_at,token_issued_at,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now(),'active')", [id, account.threadsUserId, account.username.trim(), adminId, sealed.ciphertext, sealed.iv, sealed.tag, account.expiresAt]);
       }
+      await recordAudit(client,adminId,existing.rows[0] ? 'threads.reconnected' : 'threads.connected','threads_account',id);
       await client.query('COMMIT');
       return id;
     } catch (error) { await client.query('ROLLBACK'); throw error; }

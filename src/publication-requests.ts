@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { resolveLocalSchedule } from './schedule-time.js';
+import { recordAudit } from './audit.js';
 
 export class PublicationRequestError extends Error {}
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -17,7 +18,7 @@ export class PublicationRequests {
     if (!uuid.test(userId) || !uuid.test(postId) || !Number.isSafeInteger(revision) || revision < 1) throw new PublicationRequestError('Permintaan tidak valid.');
     const userResult = await client.query<{ role: string; email_verified_at: Date | null; disabled_at: Date | null }>('SELECT role,email_verified_at,disabled_at FROM local_users WHERE id=$1 FOR SHARE', [userId]);
     const user = userResult.rows[0];
-    const result = await client.query<{ id: string; created_by: string; status: string; current_version: number; revision: number; destination_account_id: string | null }>('SELECT p.id,p.created_by,p.status,p.current_version,p.revision,v.destination_account_id FROM content_posts p JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version WHERE p.id=$1 FOR UPDATE OF p', [postId]);
+    const result = await client.query<{ id: string; created_by: string; status: string; current_version: number; revision: number; destination_account_id: string | null }>('SELECT p.id,p.created_by,p.status,p.current_version,p.revision,v.destination_account_id FROM content_posts p JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version WHERE p.id=$1 AND p.deleted_at IS NULL FOR UPDATE OF p', [postId]);
     const post = result.rows[0];
     if (!user || user.disabled_at || (requireReady && !user.email_verified_at) || !post || (post.created_by !== userId && !['admin','reviewer'].includes(user.role))) throw new PublicationRequestError('Tidak memiliki akses untuk menjadwalkan konten ini.');
     if (post.revision !== revision) throw new PublicationRequestError('Konten telah berubah; muat ulang sebelum melanjutkan.');
@@ -37,6 +38,7 @@ export class PublicationRequests {
         await this.preventRepeatedParts(client,postId);
         const result = await client.query<{ id: string; status: string; scheduled_at: Date }>("INSERT INTO publication_jobs (id,post_id,content_version,account_id,requested_by,scheduled_at,time_zone,next_attempt_at,status) SELECT $1,$2,$3,$4,$5,$6,$7,$6,'scheduled' WHERE $6::timestamptz>now() AND EXISTS (SELECT 1 FROM threads_accounts WHERE id=$4 AND token_expires_at>$6::timestamptz) RETURNING id,status,scheduled_at", [randomUUID(), postId, post.current_version, post.destination_account_id, userId, instant, timeZone]);
         if (!result.rows[0]) throw new PublicationRequestError('Waktu harus di masa depan dan sebelum token akun kedaluwarsa.');
+        await recordAudit(client,userId,'post.scheduled','post',postId,{jobId:result.rows[0].id,version:post.current_version,scheduledAt:instant.toISOString(),timeZone});
         return result.rows[0];
       });
     } catch (error) {
@@ -51,6 +53,7 @@ export class PublicationRequests {
         const post = await this.authorize(client, userId, postId, revision);
         await this.preventRepeatedParts(client,postId);
         const result = await client.query<{ id: string; status: string; scheduled_at: Date }>("INSERT INTO publication_jobs (id,post_id,content_version,account_id,requested_by,scheduled_at,time_zone,next_attempt_at,status) VALUES ($1,$2,$3,$4,$5,now(),$6,now(),'scheduled') RETURNING id,status,scheduled_at", [randomUUID(), postId, post.current_version, post.destination_account_id, userId, timeZone]);
+        await recordAudit(client,userId,'post.publish_requested','post',postId,{jobId:result.rows[0]!.id,version:post.current_version,timeZone});
         return result.rows[0]!;
       });
     } catch (error) {
@@ -70,6 +73,7 @@ export class PublicationRequests {
         ? await client.query("UPDATE publication_jobs SET status='cancelled',updated_at=now() WHERE id=$1 AND post_id=$2 AND status='scheduled' AND part_index=0 AND lease_token IS NULL RETURNING id,status,scheduled_at", [jobId, postId])
         : await client.query("UPDATE publication_jobs SET scheduled_at=$3,time_zone=$4,next_attempt_at=$3,updated_at=now() WHERE id=$1 AND post_id=$2 AND status='scheduled' AND part_index=0 AND lease_token IS NULL AND $3::timestamptz>now() AND EXISTS (SELECT 1 FROM threads_accounts WHERE id=publication_jobs.account_id AND token_expires_at>$3::timestamptz) RETURNING id,status,scheduled_at", [jobId, postId, instant, timeZone]);
       if (!result.rows[0]) throw new PublicationRequestError('Jadwal sudah diproses, tidak ditemukan, atau waktunya tidak valid.');
+      await recordAudit(client,userId,action==='cancel' ? 'post.schedule_cancelled' : 'post.rescheduled','post',postId,{jobId,scheduledAt:instant?.toISOString() ?? null,timeZone:timeZone ?? null});
       return result.rows[0];
     });
   }
@@ -84,6 +88,7 @@ export class PublicationRequests {
       const result = await client.query<{id:string;status:string;scheduled_at:Date}>("UPDATE publication_jobs j SET status='scheduled',requested_by=$3,scheduled_at=now(),next_attempt_at=now(),container_id=NULL,failure_code=NULL,updated_at=now() WHERE j.id=$1 AND j.post_id=$2 AND j.status='needs_action' AND j.lease_token IS NULL AND j.part_index>0 AND j.reply_to_id IS NOT NULL AND EXISTS (SELECT 1 FROM publication_parts p WHERE p.job_id=j.id AND p.position=j.part_index-1 AND p.status='published' AND p.published_id=j.reply_to_id) AND NOT EXISTS (SELECT 1 FROM publication_parts p WHERE p.job_id=j.id AND p.position=j.part_index AND p.status IN ('publishing','published','uncertain')) RETURNING id,status,scheduled_at",[jobId,postId,userId]);
       if (!result.rows[0]) throw new PublicationRequestError('Rangkaian belum dapat dilanjutkan. Periksa hasil bagian terakhir terlebih dahulu.');
       await client.query('INSERT INTO publication_resumptions(id,job_id,resumed_by,position) SELECT $1,id,$2,part_index FROM publication_jobs WHERE id=$3',[randomUUID(),userId,jobId]);
+      await recordAudit(client,userId,'post.resumed','post',postId,{jobId});
       return result.rows[0];
     });
   }
@@ -100,6 +105,7 @@ export class PublicationRequests {
       const status = decision === 'published' && !next.rowCount ? 'confirmed_published' : 'needs_action';
       const updated = await client.query<{id:string;status:string;scheduled_at:Date}>("UPDATE publication_jobs SET status=$3,part_index=CASE WHEN $4::boolean THEN part_index+1 ELSE part_index END,reply_to_id=CASE WHEN $4::boolean THEN $5 ELSE reply_to_id END,container_id=NULL,updated_at=now() WHERE id=$1 AND post_id=$2 RETURNING id,status,scheduled_at", [jobId,postId,status,decision==='published' && !!next.rowCount,publishedId ?? null]);
       await client.query('INSERT INTO publication_resolutions(id,job_id,resolved_by,decision) VALUES ($1,$2,$3,$4)', [randomUUID(),jobId,userId,decision]);
+      await recordAudit(client,userId,'post.resolved','post',postId,{jobId,decision,part:job.part_index+1});
       return updated.rows[0]!;
     });
   }

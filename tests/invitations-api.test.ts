@@ -11,7 +11,7 @@ import type { MailTransport } from '../src/smtp.js';
 
 test('undangan hanya oleh admin terverifikasi, sekali pakai dan mengikat email', async () => {
   const db = new PGlite();
-  for (const name of ['002_local_identity.sql', '005_invitations.sql', '006_password_reset.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
+  for (const name of ['001_content.sql','002_local_identity.sql', '005_invitations.sql', '006_password_reset.sql','018_workspace_management.sql']) await db.exec(await readFile(`db/migrations/${name}`, 'utf8'));
   const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.affectedRows ?? result.rows.length }; };
   const pool = { query, connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
   const hash = await hashPassword('kata sandi untuk pengujian');

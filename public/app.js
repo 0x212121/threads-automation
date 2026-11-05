@@ -3,7 +3,11 @@ const statusLabels = { draft: 'Draft', submitted: 'Menunggu tinjauan', approved:
 let csrf = '', user = null, posts = [], accounts = [], accountsAvailable = true, threadsConfigured = null, publishingEnabled = false, nextOffset = null, editing = null, scheduling = null, busy = false;
 let threadsConnecting = false;
 let threadsAttention = [];
+let filterAccounts=[];
 let editorMedia = [], previewObjectUrls = [], uploadedMediaIds = new Set();
+let workspacePanel='content',calendarOffset=null,historyPost=null,historyOffset=null;
+const managementOffsets={members:null,invitations:null,audit:null};
+let postLoadSequence=0;
 const linkParams = new URLSearchParams(location.hash.slice(1));
 let verificationToken = linkParams.get('verify'), invitationToken = linkParams.get('invite'), resetToken = linkParams.get('reset');
 let threadsResult = linkParams.get('threads');
@@ -28,14 +32,16 @@ function setBusy(value) {
   for (const id of ['#post-media','#remove-media','#split-post','#add-reply','#close-editor','#cancel-editor','#logout','#new-post','#empty-create']) $(id).disabled = value;
   document.querySelectorAll('.action').forEach(button => { button.disabled = value || button.dataset.edge === 'true'; });
 }
-function showLogin() { if ($('#editor').open) $('#editor').close(); if ($('#invite-dialog').open) $('#invite-dialog').close(); if ($('#schedule-dialog').open) $('#schedule-dialog').close(); $('#initial-loading').hidden = true; $('#workspace').hidden = true; $('#login-screen').hidden = false; $('#password').value = ''; $('#login-form').hidden = !!invitationToken || !!resetToken; $('#accept-invitation-form').hidden = !invitationToken; $('#reset-request-form').hidden = true; $('#reset-confirm-form').hidden = !resetToken; }
+function showLogin() { for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();historyPost=null;historySequence++;postLoadSequence++;calendarSequence++; $('#initial-loading').hidden = true; $('#workspace').hidden = true; $('#login-screen').hidden = false; $('#password').value = ''; $('#login-form').hidden = !!invitationToken || !!resetToken; $('#accept-invitation-form').hidden = !invitationToken; $('#reset-request-form').hidden = true; $('#reset-confirm-form').hidden = !resetToken; }
 function showWorkspace() {
   $('#initial-loading').hidden = true; $('#login-screen').hidden = true; $('#workspace').hidden = false;
   $('#sidebar-email').textContent = user.email;
   $('#sidebar-role').textContent = ({ admin: 'Admin', editor: 'Editor', reviewer: 'Reviewer' })[user.role] || user.role;
   $('#verified-notice').hidden = user.emailVerified;
   $('#confirm-verification').hidden = !verificationToken || user.emailVerified;
-  $('#invite-team').hidden = user.role !== 'admin' || !user.emailVerified;
+  $('#invite-team').hidden = workspacePanel!=='team' || user.role !== 'admin' || !user.emailVerified;
+  document.querySelectorAll('[data-admin]').forEach(element=>{element.hidden=user.role!=='admin' || !user.emailVerified;});
+  if (user.role!=='admin' && ['team','audit','accounts'].includes(workspacePanel)) activateWorkspace('content');
   renderThreadsConnection();
   $('#invitation-pending').hidden = !invitationToken;
   $('#reset-pending').hidden = !resetToken;
@@ -70,20 +76,23 @@ function showWorkspace() {
   threadsResult = null;
 }
 async function loadPosts(append = false) {
+  const sequence=++postLoadSequence;
   $('#loading').hidden = false; errorAt('#workspace-error', '');
   try {
-    const result = await api(`/api/posts?offset=${append ? nextOffset : 0}`);
+    const params=contentFilterParams(append ? nextOffset : 0);
+    const result = await api(`/api/posts?${params}`);
+    if (sequence!==postLoadSequence || !user) return;
     posts = append ? [...posts, ...result.posts] : result.posts;
     nextOffset = result.nextOffset;
     render();
   } catch (error) { errorAt('#workspace-error', error.message); }
-  finally { $('#loading').hidden = true; }
+  finally { if (sequence===postLoadSequence) $('#loading').hidden = true; }
 }
 async function loadAccounts() {
   threadsConfigured = null; publishingEnabled = false; renderThreadsConnection();
-  try { const result = await api('/api/threads/accounts'); accounts = result.accounts; threadsAttention = result.attention || []; accountsAvailable = true; const config = await api('/api/threads/config'); threadsConfigured = config.configured === true; publishingEnabled = config.publishingEnabled === true; }
+  try { const result = await api('/api/threads/accounts'); accounts = result.accounts; filterAccounts=result.filterAccounts || accounts;threadsAttention = result.attention || []; accountsAvailable = true; const config = await api('/api/threads/config'); threadsConfigured = config.configured === true; publishingEnabled = config.publishingEnabled === true; }
   catch (error) { if (error.status === 401) throw error; accounts = []; threadsAttention = []; accountsAvailable = false; threadsConfigured = 'error'; }
-  finally { if (user) renderThreadsConnection(); }
+  finally { if (user) {renderThreadsConnection();renderAccountFilter();} }
 }
 function renderThreadsConnection() {
   const button = $('#connect-threads'), message = $('#threads-config-message');
@@ -101,7 +110,7 @@ function renderThreadsConnection() {
 }
 function render() {
   const filter = $('#filter').value;
-  const visible = filter === 'all' ? posts : posts.filter(post => post.status === filter);
+  const visible = filter === 'all' ? posts : posts.filter(post => post.status === filter || post.job_status===filter);
   $('#empty').hidden = visible.length > 0;
   $('#empty-create').hidden = posts.length > 0;
   $('#list-wrap').hidden = visible.length === 0;
@@ -140,13 +149,16 @@ function render() {
     const blocked = partial || ['scheduled', 'preparing', 'prepared', 'publishing', 'published', 'confirmed_published', 'uncertain'].includes(post.job_status);
     const mayManage = own || user.role === 'admin' || user.role === 'reviewer';
     const mayPublish = user.emailVerified && mayManage;
+    const accountReady=accountsAvailable && accounts.some(account=>account.id===post.destination_account_id);
+    addAction(actions,'Riwayat',()=>openHistory(post));
+    if (own && ['draft','rejected'].includes(post.status) && !blocked) addAction(actions,'Hapus draft',()=>deleteDraft(post));
     if (own && post.status !== 'submitted' && !blocked) addAction(actions, 'Ubah', () => openEditor(post));
     if (own && (post.status === 'draft' || post.status === 'rejected') && !blocked) addAction(actions, 'Ajukan', () => transition(post, 'submit'));
     if (post.status === 'submitted' && (user.role === 'admin' || user.role === 'reviewer')) {
       addAction(actions, 'Setujui', () => transition(post, 'approve'));
       addAction(actions, 'Tolak', () => transition(post, 'reject'));
     }
-    if (post.status === 'approved' && mayPublish && post.destination_account_id && !blocked && publishingEnabled) {
+    if (post.status === 'approved' && mayPublish && accountReady && !blocked && publishingEnabled) {
       addAction(actions, 'Jadwalkan', () => openSchedule(post));
       addAction(actions, 'Terbitkan sekarang', () => publishNow(post));
     }
@@ -158,7 +170,7 @@ function render() {
       addAction(actions, 'Sudah terbit', () => resolvePublication(post, 'published'));
       addAction(actions, 'Tidak terbit', () => resolvePublication(post, 'not_published'));
     }
-    if (partial && mayPublish && publishingEnabled) addAction(actions, 'Lanjutkan rangkaian', () => resumePublication(post));
+    if (partial && mayPublish && accountReady && publishingEnabled) addAction(actions, 'Lanjutkan rangkaian', () => resumePublication(post));
     list.append(row);
   }
 }
@@ -434,9 +446,223 @@ $('#new-post').addEventListener('click', () => openEditor());
 $('#empty-create').addEventListener('click', () => openEditor());
 $('#close-editor').addEventListener('click', closeEditor);
 $('#cancel-editor').addEventListener('click', closeEditor);
-$('#filter').addEventListener('change', render);
+$('#filter').addEventListener('change',()=>refreshContentView());
 $('#load-more').addEventListener('click', async () => { const button = $('#load-more'); button.disabled = true; try { await loadPosts(true); } finally { button.disabled = false; } });
-for (const link of document.querySelectorAll('[data-view]')) link.addEventListener('click', () => { document.querySelectorAll('[data-view]').forEach(el => el.classList.toggle('active', el === link)); $('#filter').value = link.dataset.view; render(); });
+function textElement(tag,text,className='') {
+  const element=document.createElement(tag);element.textContent=text;if (className) element.className=className;return element;
+}
+function displayTime(value,zone=$('#filter-zone').value || 'UTC') {
+  if (!value) return '';
+  try {return new Intl.DateTimeFormat('id-ID',{dateStyle:'medium',timeStyle:'short',timeZone:zone}).format(new Date(value));} catch {return String(value);}
+}
+function renderAccountFilter() {
+  const select=$('#filter-account'),selected=select.value,existing=[...select.options].map(option=>({id:option.value,username:option.textContent}));
+  select.replaceChildren(new Option('Semua akun',''));
+  const available=new Map(existing.filter(item=>item.id).map(item=>[item.id,item.username]));
+  for (const account of filterAccounts) available.set(account.id,`@${account.username}`);
+  for (const [id,name] of available) select.append(new Option(name,id));
+  select.value=selected;
+}
+function contentFilterParams(offset=0) {
+  const params=new URLSearchParams({offset:String(offset ?? 0),timeZone:$('#filter-zone').value.trim() || 'UTC'});
+  for (const [key,id] of [['status','filter'],['accountId','filter-account'],['dateField','filter-date-field'],['dateFrom','filter-from'],['dateTo','filter-to']]) if ($( `#${id}`).value) params.set(key,$(`#${id}`).value);
+  return params;
+}
+async function refreshContentView() {if (workspacePanel==='calendar') await loadCalendar();else await loadPosts();}
+async function activateWorkspace(panel) {
+  if (busy || !user) return;
+  if (['team','audit','accounts'].includes(panel) && (user.role!=='admin' || !user.emailVerified)) return;
+  workspacePanel=panel;
+  $('.breadcrumb strong').textContent=({content:'Konten',calendar:'Kalender',team:'Anggota tim',accounts:'Akun Threads',audit:'Audit'})[panel];
+  $('#threads-connect-panel').hidden=!['content','accounts'].includes(panel);
+  $('#invite-team').hidden=panel!=='team' || user.role!=='admin' || !user.emailVerified;
+  $('#verification-status').hidden=true;
+  if (panel!=='content') document.querySelectorAll('[data-view]').forEach(link=>link.classList.remove('active'));
+  $('#konten').hidden=panel!=='content';$('#ringkasan').hidden=panel!=='content';
+  $('#content-filters').hidden=!['content','calendar'].includes(panel);
+  for (const name of ['calendar','team','accounts','audit']) $(`#${name}-panel`).hidden=name!==panel;
+  document.querySelectorAll('[data-panel]').forEach(button=>{if (button.dataset.panel===panel) button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});
+  for (const id of ['filter-date-field','filter-from','filter-to']) $(`#${id}`).disabled=panel==='calendar';
+  if (panel==='calendar') await loadCalendar();
+  else if (panel==='team') await loadTeam();
+  else if (panel==='accounts') await loadManagedAccounts();
+  else if (panel==='audit') await loadAudit();
+  else await loadPosts();
+}
+for (const button of document.querySelectorAll('[data-panel]')) button.addEventListener('click',()=>activateWorkspace(button.dataset.panel));
+$('#content-filters').addEventListener('submit',event=>{event.preventDefault();void refreshContentView();});
+$('#reset-filters').addEventListener('click',()=>{$('#content-filters').reset();void refreshContentView();});
+let calendarSequence=0;
+async function loadCalendar(append=false) {
+  const sequence=++calendarSequence,status=$('#calendar-status'),button=$('#calendar-more');button.disabled=true;status.textContent='Memuat jadwal...';
+  try {
+    const month=$('#calendar-month').value;if (!/^\d{4}-\d{2}$/.test(month)) throw new Error('Pilih bulan kalender.');
+    const [year,number]=month.split('-').map(Number),days=new Date(Date.UTC(year,number,0)).getUTCDate();
+    $('#filter-from').value=`${month}-01`;$('#filter-to').value=`${month}-${days}`;$('#filter-date-field').value='scheduled';
+    const result=await api(`/api/posts?${contentFilterParams(append ? calendarOffset : 0)}`);
+    if (sequence!==calendarSequence || !user) return;
+    if (!append) {
+      const grid=$('#calendar-grid');grid.replaceChildren();
+      for (const label of ['Sen','Sel','Rab','Kam','Jum','Sab','Min']) {const heading=textElement('div',label,'calendar-weekday');heading.setAttribute('aria-hidden','true');grid.append(heading);}
+      const startsOn=(new Date(Date.UTC(year,number-1,1)).getUTCDay()+6)%7;
+      for (let index=0;index<startsOn;index++) {const spacer=textElement('div','','calendar-spacer');spacer.setAttribute('aria-hidden','true');grid.append(spacer);}
+      for (let day=1;day<=days;day++) {
+        const cell=textElement('section','', 'calendar-day');cell.dataset.day=`${month}-${String(day).padStart(2,'0')}`;
+        cell.setAttribute('aria-label',cell.dataset.day);
+        cell.append(textElement('h3',String(day)));grid.append(cell);
+      }
+    }
+    for (const post of result.posts) {
+      if (!post.scheduled_at) continue;
+      const date=new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:$('#filter-zone').value}).format(new Date(post.scheduled_at));
+      const cell=[...$('#calendar-grid').children].find(element=>element.dataset.day===date);if (!cell) continue;
+      const item=document.createElement('button');item.type='button';item.className='calendar-entry';
+      const time=new Intl.DateTimeFormat('id-ID',{hour:'2-digit',minute:'2-digit',timeZone:$('#filter-zone').value}).format(new Date(post.scheduled_at));
+      item.textContent=`${time} · @${post.destination_username || 'akun'} · ${publicationLabel(post.job_status)}\n${post.body || 'Posting media'}`;
+      item.addEventListener('click',()=>openHistory(post));cell.append(item);
+    }
+    calendarOffset=result.nextOffset;button.hidden=calendarOffset===null;
+    status.textContent=result.posts.length || append ? `Zona waktu: ${$('#filter-zone').value}. Klik posting untuk membuka riwayat.${calendarOffset!==null ? ' Masih ada jadwal yang belum dimuat.' : ''}` : 'Belum ada jadwal pada bulan dan filter ini.';
+  } catch(error) {status.textContent=error.message;}
+  finally {if (sequence===calendarSequence) button.disabled=false;}
+}
+$('#calendar-month').value=`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+$('#calendar-month').addEventListener('change',()=>loadCalendar());
+for (const [id,offset] of [['calendar-prev',-1],['calendar-next',1]]) $(`#${id}`).addEventListener('click',()=>{
+  const value=$('#calendar-month').value;if (!value) return;
+  const [year,month]=value.split('-').map(Number),date=new Date(Date.UTC(year,month-1+offset,1));$('#calendar-month').value=date.toISOString().slice(0,7);void loadCalendar();
+});
+$('#calendar-more').addEventListener('click',()=>loadCalendar(true));
+async function deleteDraft(post) {
+  if (busy || !confirm('Hapus draft ini dari daftar konten? Riwayatnya tetap disimpan untuk audit.')) return;
+  setBusy(true);errorAt('#workspace-error','');
+  try {await api(`/api/posts/${post.id}`,{method:'DELETE',body:JSON.stringify({revision:post.revision})});await loadPosts();}
+  catch(error) {errorAt('#workspace-error',error.message);} finally {setBusy(false);}
+}
+const actionNames={'post.created':'Draft dibuat','post.edited':'Konten diubah','post.submit':'Konten diajukan','post.approve':'Konten disetujui','post.reject':'Konten ditolak','post.deleted':'Draft dihapus','member.updated':'Anggota diperbarui','invitation.issued':'Undangan dibuat','invitation.accepted':'Undangan diterima','invitation.revoked':'Undangan dicabut','threads.connected':'Akun Threads dihubungkan','threads.reconnected':'Akun Threads dihubungkan ulang','threads.disconnected':'Akun Threads diputus','threads.permissions_checked':'Izin Threads diperiksa'};
+Object.assign(actionNames,{'post.scheduled':'Publikasi dijadwalkan','post.publish_requested':'Publikasi diminta','post.schedule_cancelled':'Jadwal dibatalkan','post.rescheduled':'Jadwal diubah','post.resumed':'Rangkaian dilanjutkan','post.resolved':'Hasil publikasi dikonfirmasi'});
+function publicationLabel(value) {return ({scheduled:'Terjadwal',preparing:'Menyiapkan',prepared:'Menunggu kesiapan',publishing:'Sedang menerbitkan',published:'Terbit',confirmed_published:'Terbit, dikonfirmasi',uncertain:'Hasil belum pasti',needs_action:'Perlu tindakan',cancelled:'Dibatalkan'})[value] || value;}
+function historyDetails(entry,item) {
+  const labels={job_id:'Pekerjaan',content_version:'Versi konten',reviewer_id:'Reviewer',resolved_by:'Dikonfirmasi oleh',resumed_by:'Dilanjutkan oleh',actor_id:'Pelaku',failure_reason:'Kategori kegagalan',failure_http_status:'HTTP',failure_meta_code:'Kode Meta',failure_meta_subcode:'Subkode Meta',failure_code:'Alasan tindakan',previous_id:'ID sebelumnya',corrected_id:'ID pengganti'};
+  for (const [key,label] of Object.entries(labels)) if (item[key]!=null) entry.append(textElement('p',`${label}: ${item[key]}`,'field-help'));
+  if (item.part_index!=null || item.position!=null) entry.append(textElement('p',`Bagian ${Number(item.part_index ?? item.position)+1}`,'field-help'));
+  if (item.scheduled_at) entry.append(textElement('p',`Jadwal: ${displayTime(item.scheduled_at,item.time_zone)} (${item.time_zone})`,'field-help'));
+  for (const part of item.parts || []) entry.append(textElement('p',`Bagian ${part.position+1}: ${publicationLabel(part.status)}${part.publishedId ? ` · ID ${part.publishedId}` : ''}`,'field-help'));
+  if (item.details) for (const [key,label] of Object.entries({version:'Versi',previousRole:'Peran sebelumnya',role:'Peran baru',disabled:'Nonaktif',pausedJobs:'Pekerjaan dihentikan',jobId:'Pekerjaan',scheduledAt:'Jadwal UTC',timeZone:'Zona waktu',decision:'Konfirmasi',part:'Bagian'})) if (item.details[key]!=null) entry.append(textElement('p',`${label}: ${item.details[key]}`,'field-help'));
+}
+let historySequence=0;
+async function openHistory(post) {
+  historyPost=post;historyOffset=0;$('#history-list').replaceChildren();$('#history-dialog').showModal();await loadHistory();
+}
+async function loadHistory() {
+  const sequence=++historySequence,post=historyPost,offset=historyOffset;$('#history-status').textContent='Memuat riwayat...';$('#history-more').disabled=true;
+  try {
+    const result=await api(`/api/posts/${post.id}/history?offset=${offset}`);if (sequence!==historySequence || historyPost!==post || !user) return;
+    let more=false;
+    const headings={versions:'Versi konten',reviews:'Keputusan tinjauan',jobs:'Pekerjaan publikasi',attempts:'Percobaan publikasi',events:'Aktivitas konten',resolutions:'Konfirmasi hasil',resumptions:'Kelanjutan rangkaian',repairs:'Pemulihan referensi'};
+    for (const [name,title] of Object.entries(headings)) {
+      const page=result[name];if (!page) continue;
+      more ||= page.nextOffset!==null;
+      let section=$(`#history-${name}`);
+      if (!section) {section=document.createElement('section');section.id=`history-${name}`;section.append(textElement('h3',title));$('#history-list').append(section);}
+      if (!page.items.length && offset===0) section.append(textElement('p','Belum ada catatan.','field-help'));
+      for (const item of page.items) {
+        const entry=document.createElement('article');entry.className='history-entry';
+        if (name==='versions') {
+          entry.append(textElement('h4',`Versi ${item.version} · ${displayTime(item.created_at)} · ${item.created_by}`),textElement('p',item.destination_username ? `@${item.destination_username}` : 'Tanpa akun tujuan'),textElement('p',item.body || 'Tanpa teks','history-body'));
+          for (const [index,reply] of (item.replies || []).entries()) entry.append(textElement('p',`Bagian ${index+2}: ${reply}`,'history-body'));
+          for (const asset of item.media || []) {const link=document.createElement('a');link.href=`/api/media/${encodeURIComponent(asset.id)}/content`;link.target='_blank';link.rel='noopener';link.textContent=`Buka ${asset.kind==='IMAGE' ? 'gambar' : 'video'}`;entry.append(link);}
+        } else {
+          const when=item.created_at || item.scheduled_at;
+          const label=item.action ? actionNames[item.action] || item.action : [publicationLabel(item.status),({prepare:'Persiapan',publish:'Publikasi'})[item.stage],({started:'Dimulai',succeeded:'Berhasil',safe_failure:'Gagal sebelum publikasi',uncertain:'Hasil belum pasti'})[item.outcome],({approved:'Disetujui',rejected:'Ditolak',published:'Terbit dikonfirmasi',not_published:'Tidak terbit dikonfirmasi'})[item.decision]].filter(Boolean).join(' · ');
+          entry.append(textElement('h4',`${label} · ${displayTime(when)}`));
+          historyDetails(entry,item);
+        }
+        section.append(entry);
+      }
+    }
+    historyOffset=offset+50;$('#history-more').hidden=!more;$('#history-status').textContent='Seluruh waktu ditampilkan pada zona waktu filter. Catatan lama sebelum audit diaktifkan dapat tidak memiliki aktivitas.';
+  } catch(error) {$('#history-status').textContent=error.message;$('#history-more').hidden=false;}
+  finally {if (sequence===historySequence) $('#history-more').disabled=false;}
+}
+$('#close-history').addEventListener('click',()=>{$('#history-dialog').close();historyPost=null;historySequence++;});
+$('#history-more').addEventListener('click',()=>loadHistory());
+async function managementAction(statusId,operation,reload) {
+  if (busy) return;setBusy(true);errorAt(statusId,'Menyimpan perubahan...');
+  try {await operation();await reload();}
+  catch(error) {errorAt(statusId,error.message);} finally {setBusy(false);}
+}
+async function loadTeam(appendKind=null) {
+  $('#team-status').textContent='Memuat anggota dan undangan...';
+  try {
+    for (const kind of appendKind ? [appendKind] : ['members','invitations']) {
+      const offset=appendKind ? managementOffsets[kind] : 0,result=await api(`${kind==='members' ? '/api/team/members' : '/api/invitations'}?offset=${offset}`),container=$(kind==='members' ? '#member-list' : '#invitation-list');
+      if (!user) return;if (!appendKind) container.replaceChildren();
+      if (!result[kind].length && !appendKind) container.append(textElement('p',kind==='members' ? 'Belum ada anggota.' : 'Belum ada undangan.','field-help'));
+      for (const item of result[kind]) {
+        const row=textElement('article','', 'management-row');row.append(textElement('h3',item.email));
+        if (kind==='members') {
+          row.append(textElement('p',`${item.disabled_at ? 'Nonaktif' : 'Aktif'} · ${item.email_verified_at ? 'Email terverifikasi' : 'Email belum diverifikasi'}`,'field-help'));
+          const label=textElement('label','Peran anggota'),select=document.createElement('select');select.setAttribute('aria-label',`Peran ${item.email}`);
+          for (const role of ['editor','reviewer','admin']) select.append(new Option(role,role));select.value=item.role;label.append(select);row.append(label);
+          const expected={expectedRole:item.role,expectedDisabled:!!item.disabled_at};
+          addAction(row,'Simpan peran',()=>{if (select.value===item.role) return;if (!confirm(`Ubah peran ${item.email} menjadi ${select.value}? Sesi lamanya akan dicabut.`)) return;void managementAction('#team-status',()=>api(`/api/team/members/${item.id}`,{method:'PATCH',body:JSON.stringify({...expected,role:select.value})}),loadTeam);});
+          if (item.id!==user.id) addAction(row,item.disabled_at ? 'Aktifkan anggota' : 'Nonaktifkan anggota',()=>{if (!confirm(`${item.disabled_at ? 'Aktifkan' : 'Nonaktifkan'} ${item.email}?`)) return;void managementAction('#team-status',()=>api(`/api/team/members/${item.id}`,{method:'PATCH',body:JSON.stringify({...expected,disabled:!item.disabled_at})}),loadTeam);});
+        } else {
+          const state=item.accepted_at ? 'Diterima' : item.revoked_at ? 'Dicabut' : new Date(item.expires_at)<=new Date() ? 'Kedaluwarsa' : 'Menunggu';
+          row.append(textElement('p',`${item.role} · ${state} · Berlaku sampai ${displayTime(item.expires_at)}`,'field-help'));
+          if (state==='Menunggu') addAction(row,'Cabut undangan',()=>{if (!confirm(`Cabut undangan ${item.email}?`)) return;void managementAction('#team-status',()=>api(`/api/invitations/${item.id}`,{method:'DELETE'}),loadTeam);});
+        }
+        container.append(row);
+      }
+      managementOffsets[kind]=result.nextOffset;$(`#${kind}-more`).hidden=result.nextOffset===null;
+    }
+    $('#team-status').textContent='Data anggota dan undangan dimuat.';
+  } catch(error) {$('#team-status').textContent=error.message;}
+}
+$('#refresh-team').addEventListener('click',()=>loadTeam());
+for (const kind of ['members','invitations']) $(`#${kind}-more`).addEventListener('click',()=>loadTeam(kind));
+async function loadManagedAccounts() {
+  $('#accounts-status').textContent='Memuat akun...';
+  try {
+    const result=await api('/api/threads/accounts/manage');if (!user) return;
+    const list=$('#account-list');list.replaceChildren();
+    for (const account of result.accounts) {
+      const row=textElement('article','', 'management-row');row.append(textElement('h3',`@${account.username}`),textElement('p',account.status==='active' ? `Terhubung · Token berlaku sampai ${displayTime(account.token_expires_at) || 'tidak tersedia'} · Pembaruan token: ${({ok:'normal',retry:'menunggu percobaan ulang',reconnect:'perlu dihubungkan ulang'})[account.refresh_status] || account.refresh_status}` : 'Terputus · Token lokal telah dihapus','field-help'));
+      const detail=textElement('p','', 'permission-details');detail.setAttribute('role','status');
+      if (account.status==='active') {
+        addAction(row,'Periksa izin',async()=>{
+          if (busy) return;setBusy(true);detail.textContent='Memeriksa izin Meta...';
+          try {
+            const report=await api(`/api/threads/accounts/${account.id}/permissions`,{method:'POST'}),checked=report.accounts?.[0];
+            if (report.status!=='ok' || !checked || checked.status!=='ok') throw new Error('Izin belum dapat diperiksa. Periksa konfigurasi server atau coba lagi.');
+            detail.textContent=`Token: ${checked.valid ? 'valid' : 'tidak valid'}. App ID: ${checked.appMatches===null ? 'tidak dapat dicocokkan' : checked.appMatches ? 'sesuai' : 'berbeda'}. Izin tersedia: ${checked.granted.join(', ') || 'tidak ada'}. Izin kurang: ${checked.missing.join(', ') || 'tidak ada'}.`;
+          } catch(error) {detail.textContent=error.message;} finally {setBusy(false);}
+        });
+        addAction(row,'Putuskan koneksi',()=>{if (!confirm(`Putuskan @${account.username} dari aplikasi ini? Jadwal yang belum diproses akan memerlukan tindakan. Izin di Meta tidak dicabut oleh tindakan ini.`)) return;void managementAction('#accounts-status',()=>api(`/api/threads/accounts/${account.id}`,{method:'DELETE'}),async()=>{await loadAccounts();await loadManagedAccounts();});});
+      }
+      addAction(row,'Hubungkan ulang',()=>$('#connect-threads').click());row.append(detail);list.append(row);
+      const select=$('#filter-account');if (![...select.options].some(option=>option.value===account.id)) select.append(new Option(`@${account.username}`,account.id));
+    }
+    $('#accounts-status').textContent=result.accounts.length ? 'Status akun dimuat.' : 'Belum ada akun. Gunakan Hubungkan akun Threads untuk memulai.';
+  } catch(error) {$('#accounts-status').textContent=error.message;}
+}
+$('#refresh-accounts').addEventListener('click',()=>loadManagedAccounts());
+async function loadAudit(append=false) {
+  $('#audit-status').textContent='Memuat aktivitas...';
+  try {
+    const result=await api(`/api/audit?offset=${append ? managementOffsets.audit : 0}`);if (!user) return;
+    const list=$('#audit-list');if (!append) list.replaceChildren();
+    for (const event of result.events) {
+      const row=textElement('li','', 'history-entry'),subject=event.subject_label || `${({post:'Konten',member:'Anggota',invitation:'Undangan',threads_account:'Akun Threads'})[event.subject_type]} ${event.subject_id.slice(0,8)}`;
+      row.append(textElement('strong',actionNames[event.action] || event.action),textElement('p',`${displayTime(event.created_at)} · ${event.actor_email || `Anggota ${event.actor_id.slice(0,8)}`} · ${subject}`,'field-help'));
+      historyDetails(row,{details:event.details});list.append(row);
+    }
+    managementOffsets.audit=result.nextOffset;$('#audit-more').hidden=result.nextOffset===null;$('#audit-status').textContent=result.events.length || append ? 'Aktivitas dimuat.' : 'Belum ada aktivitas audit.';
+  } catch(error) {$('#audit-status').textContent=error.message;}
+}
+$('#refresh-audit').addEventListener('click',()=>loadAudit());$('#audit-more').addEventListener('click',()=>loadAudit(true));
+for (const link of document.querySelectorAll('[data-view]')) link.addEventListener('click', () => { document.querySelectorAll('[data-view]').forEach(el => el.classList.toggle('active', el === link)); $('#filter').value = link.dataset.view; activateWorkspace('content'); });
 (async () => {
   try {
     csrf = (await api('/api/auth/csrf')).csrfToken;

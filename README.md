@@ -2,7 +2,7 @@
 
 Proyek aplikasi internal untuk pengelolaan dan penjadwalan konten Threads. Aplikasi utama menyediakan login, draft, carousel gambar, rangkaian balasan, persetujuan, serta penjadwalan dan penerbitan untuk pengujian terbatas.
 
-Yang tersedia: antarmuka utama, login lokal, database, lampiran media, draft, dan persetujuan. Aplikasi utama terpisah dari demo; data keduanya tidak digabungkan.
+Yang tersedia: login lokal, lampiran media, draft, persetujuan, kalender/filter, pengelolaan anggota dan undangan, pengelolaan akun Threads, hapus draft, riwayat konten dan audit. Aplikasi utama terpisah dari demo; data keduanya tidak digabungkan.
 
 ## Menjalankan aplikasi utama secara lokal
 
@@ -21,7 +21,7 @@ Mode ini menjalankan PostgreSQL berbasis WASM lokal dan menyimpan data di `.loca
 
 Jalankan `npm run demo`, lalu buka `http://127.0.0.1:4173`. Demo hanya menggunakan Node.js dan penyimpanan lokal browser; tidak memerlukan database atau akun. Demo menyediakan alur draft, pengajuan, persetujuan, filter, dan jadwal simulasi. Tidak ada login, sinkronisasi tim, koneksi Threads, notifikasi, atau publikasi otomatis. Menghapus data situs di browser akan menghapus data demo. Untuk menggunakan port lain, atur environment variable `DEMO_PORT` sebelum menjalankan server.
 
-Pengguna melaporkan koneksi OAuth dan penerbitan satu gambar berhasil dengan akun Threads Tester. Carousel, rangkaian balasan dan refresh token baru diuji dengan respons Meta simulasi. Belum tersedia: pengelolaan anggota setelah bergabung, Google Sign-In, GoWhatsapp, serta akses API untuk integrasi mesin. Draft membutuhkan teks atau lampiran. Undangan dan verifikasi email tersedia jika SMTP dikonfigurasi; hasil pengujian SMTP nyata belum didokumentasikan. Hardening, backup dan pemantauan produksi masih diperlukan.
+Pengguna melaporkan koneksi OAuth, penerbitan satu gambar, dan kelanjutan rangkaian balasan berhasil dengan akun Threads Tester. Carousel dan refresh token masih memerlukan validasi Meta nyata. Belum tersedia: Google Sign-In, GoWhatsapp, serta akses API untuk integrasi mesin. Draft membutuhkan teks atau lampiran. Undangan dan verifikasi email tersedia jika SMTP dikonfigurasi; hasil pengujian SMTP nyata belum didokumentasikan. Hardening, backup dan pemantauan produksi masih diperlukan.
 
 ## Pengembangan lokal
 
@@ -40,6 +40,18 @@ Gunakan `APP_ORIGIN` yang dapat diakses penerima dan cocok persis dengan origin 
 ## Mengundang anggota
 
 Administrator yang telah memverifikasi email dapat memilih **Undang anggota**, memasukkan email dan peran, lalu mengirim undangan. Penerima membuka tautan dan membuat kata sandi; tautan berlaku tujuh hari dan hanya dapat dipakai sekali. Kepemilikan alamat dibuktikan dengan menggunakan tautan yang dikirim kepadanya. Pengiriman ulang membuat tautan sebelumnya tidak berlaku. Undangan memerlukan SMTP dan `APP_ORIGIN` yang dapat diakses penerima. Mode lokal hanya untuk pengujian pada komputer yang sama.
+
+## Anggota, kalender, akun, dan riwayat
+
+Setelah migrasi `018_workspace_management.sql`, gunakan tab **Anggota tim**, **Kalender**, **Akun Threads**, dan **Audit** pada aplikasi utama. Tab administratif hanya tersedia bagi admin dengan email terverifikasi; pemeriksaan yang sama diterapkan di server.
+
+- **Anggota tim:** daftar anggota dan undangan memiliki paginasi. Admin dapat mengubah peran, menonaktifkan/mengaktifkan anggota dan mencabut undangan yang belum digunakan. Perubahan peran/status mencabut sesi lama. Akun yang sedang digunakan tidak dapat dinonaktifkan dan admin aktif terverifikasi terakhir tidak dapat diturunkan perannya. Pekerjaan pengguna nonaktif yang belum diklaim menjadi perlu tindakan; yang sudah dikirim tetap mengikuti alur hasil/rekonsiliasi.
+- **Kalender dan filter:** filter akun, status, tanggal pembuatan atau jadwal, dan zona waktu diterapkan di server sebelum paginasi. Rentang tanggal mencakup seluruh hari pada zona waktu pilihan. Kalender memakai jadwal publikasi pada bulan terpilih; draft tanpa jadwal tetap di daftar konten. Gunakan **Muat jadwal lainnya** bila masih ada halaman berikutnya.
+- **Akun Threads:** lihat akun aktif, kedaluwarsa, dan terputus; gunakan **Periksa izin** untuk validitas token, kecocokan App ID bila tersedia, serta izin tersedia/kurang. **Hubungkan ulang** membuka alur OAuth yang sama. **Putuskan koneksi** menghapus token dari aplikasi dan menghentikan antrean yang belum diklaim. Ini pemutusan lokal, bukan pencabutan izin di Meta; pencabutan penuh dilakukan melalui pengaturan aplikasi pada akun Threads. Menghubungkan ulang tidak otomatis menerbitkan ulang pekerjaan yang dihentikan.
+- **Hapus draft:** hanya pembuat dapat menghapus draft atau konten ditolak yang tidak memiliki publikasi aktif, hasil belum pasti, atau bagian yang sudah terbit. Draft disembunyikan melalui soft delete; versi, lampiran, dan audit tetap disimpan untuk retensi. Fitur ini tidak menghapus posting di Threads atau menjalankan pembersihan berkas otomatis.
+- **Riwayat dan audit:** tombol **Riwayat** pada konten atau posting kalender menampilkan versi dan media, review, pekerjaan, percobaan, konfirmasi hasil, kelanjutan, pemulihan referensi, dan aktivitas konten. Seluruh anggota dapat membaca riwayat konten tim. Audit administratif hanya untuk admin terverifikasi. Audit baru dicatat sejak fitur diaktifkan; data lama yang tersedia tetap ditampilkan tanpa mengarang aktivitas yang tidak pernah tersimpan.
+
+Untuk pengujian browser terisolasi, jalankan `node --import tsx scripts/verify-workspace.mjs` dengan Chrome/Chromium terpasang (`CHROME_BINARY` dapat diatur). Skrip memakai database sementara, data sintetis, dan respons Meta/SMTP palsu; tidak menjalankan worker atau mengirim posting/email sungguhan. Laporan serta screenshot desktop/ponsel disimpan di `.local-data/verification`, yang tidak masuk Git.
 
 ## Pemulihan kata sandi
 

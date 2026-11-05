@@ -1,3 +1,6 @@
+import type { Pool } from 'pg';
+import type { TokenVault } from './token-vault.js';
+import { diagnoseThreadsTokens } from './threads-token-diagnostic.js';
 type Fetcher = typeof fetch;
 export type ThreadsOAuthStage = 'configuration' | 'code_exchange' | 'long_token' | 'profile';
 export type ThreadsOAuthMetaReason = 'tester_or_review' | 'permissions' | 'app_credentials' | 'token' | 'unsupported_request' | 'other';
@@ -18,6 +21,9 @@ export class ThreadsOAuthClient {
     const url = new URL('https://www.threads.com/oauth/authorize');
     url.search = new URLSearchParams({ client_id: this.config.appId, redirect_uri: this.config.redirectUri, scope: 'threads_basic,threads_content_publish,threads_manage_replies,threads_read_replies', response_type: 'code', state }).toString();
     return url.toString();
+  }
+  checkPermissions(pool:Pool,vault:TokenVault,accountId:string) {
+    return diagnoseThreadsTokens(pool,vault,this.config.appId,this.config.appSecret,this.request,accountId);
   }
   async exchange(code: string): Promise<{ threadsUserId: string; username: string; token: string; expiresAt: Date }> {
     if (!code || code.length > 4096) throw new ThreadsOAuthError('Kode otorisasi tidak valid.', 'code_exchange');

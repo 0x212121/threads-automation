@@ -19,6 +19,9 @@ import { ThreadsOAuthClient, ThreadsOAuthError } from './threads-oauth-client.js
 import { PublicationRequests, PublicationRequestError } from './publication-requests.js';
 import { verifyPublishedPart } from './verify-published-part.js';
 import { MediaStore, MediaError, MEDIA_UPLOAD_LIMIT } from './media-store.js';
+import { managementRoutes } from './management-routes.js';
+import { postFilters } from './post-filters.js';
+import { ManagementError } from './workspace-management.js';
 
 declare module 'express-session' {
   interface SessionData { userId?: string; userVersion?: number; csrf?: string }
@@ -203,7 +206,8 @@ export async function createApp(options: Options) {
     try {
       const result = await options.pool.query("SELECT id, username, status FROM threads_accounts WHERE status='active' AND token_expires_at > now() ORDER BY username, id");
       const attention = await options.pool.query("SELECT username, CASE WHEN token_expires_at<=now() THEN 'expired' ELSE refresh_status END AS reason FROM threads_accounts WHERE status='active' AND (token_expires_at<=now() OR refresh_status IN ('retry','reconnect')) ORDER BY username,id");
-      res.set('Cache-Control', 'no-store').json({ accounts: result.rows, attention: attention.rows });
+      const filterAccounts=await options.pool.query('SELECT id,username FROM threads_accounts ORDER BY username,id');
+      res.set('Cache-Control', 'no-store').json({ accounts: result.rows, attention: attention.rows,filterAccounts:filterAccounts.rows });
     } catch (error) { next(error); }
   });
   const verification = new EmailVerification(options.pool);
@@ -235,9 +239,10 @@ export async function createApp(options: Options) {
   });
   const requireVerifiedAdmin: RequestHandler = (_req, res, next) => {
     const actor = res.locals.user as User;
-    if (actor.role !== 'admin' || !actor.email_verified_at) { res.status(403).json({ error: 'Hanya administrator dengan email terverifikasi dapat mengundang.' }); return; }
+    if (actor.role !== 'admin' || !actor.email_verified_at) { res.status(403).json({ error: 'Hanya administrator dengan email terverifikasi dapat mengelola tim dan akun.' }); return; }
     next();
   };
+  managementRoutes(app,{pool:options.pool,permissionCheck:options.threads ? id=>options.threads!.client.checkPermissions(options.pool,options.threads!.vault,id) : undefined},requireUser,checkCsrf,requireVerifiedAdmin);
   app.post('/api/invitations', requireUser, checkCsrf, requireVerifiedAdmin, mailLimit, async (req, res) => {
     const actor = res.locals.user as User;
     if (!options.mail) { res.status(503).json({ error: 'Email belum dikonfigurasi oleh administrator.' }); return; }
@@ -282,12 +287,11 @@ export async function createApp(options: Options) {
   });
   app.get('/api/posts', requireUser, async (req, res, next) => {
     try {
-      const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
-      if (!Number.isSafeInteger(offset) || offset < 0 || offset > Number.MAX_SAFE_INTEGER - 50) { res.status(400).json({ error: 'Offset tidak valid.' }); return; }
-      const result = await options.pool.query("SELECT p.id, p.created_by, p.status, p.current_version, p.revision, p.created_at, p.updated_at, v.body, v.media_id, m.kind AS media_kind, COALESCE((SELECT json_agg(json_build_object('id',cm.media_id,'kind',ma.kind) ORDER BY cm.position) FROM content_version_media cm JOIN media_assets ma ON ma.id=cm.media_id WHERE cm.post_id=p.id AND cm.version=p.current_version),'[]'::json) AS media, COALESCE((SELECT json_agg(r.body ORDER BY r.position) FROM content_version_replies r WHERE r.post_id=p.id AND r.version=p.current_version),'[]'::json) AS replies, v.destination_account_id, a.username AS destination_username, j.id AS job_id, j.status AS job_status, j.part_index, j.scheduled_at, j.time_zone, j.published_id, j.failure_code FROM content_posts p JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version LEFT JOIN media_assets m ON m.id=v.media_id LEFT JOIN threads_accounts a ON a.id=v.destination_account_id LEFT JOIN LATERAL (SELECT id,status,part_index,scheduled_at,time_zone,published_id,failure_code FROM publication_jobs WHERE post_id=p.id ORDER BY created_at DESC,id DESC LIMIT 1) j ON true ORDER BY p.created_at DESC, p.id DESC LIMIT 51 OFFSET $1", [offset]);
+      const {offset,where,params}=postFilters(req.query);
+      const result = await options.pool.query("SELECT p.id, p.created_by, p.status, p.current_version, p.revision, p.created_at, p.updated_at, v.body, v.media_id, m.kind AS media_kind, COALESCE((SELECT json_agg(json_build_object('id',cm.media_id,'kind',ma.kind) ORDER BY cm.position) FROM content_version_media cm JOIN media_assets ma ON ma.id=cm.media_id WHERE cm.post_id=p.id AND cm.version=p.current_version),'[]'::json) AS media, COALESCE((SELECT json_agg(r.body ORDER BY r.position) FROM content_version_replies r WHERE r.post_id=p.id AND r.version=p.current_version),'[]'::json) AS replies, v.destination_account_id, a.username AS destination_username, j.id AS job_id, j.status AS job_status, j.part_index, j.scheduled_at, j.time_zone, j.published_id, j.failure_code FROM content_posts p JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version LEFT JOIN media_assets m ON m.id=v.media_id LEFT JOIN threads_accounts a ON a.id=v.destination_account_id LEFT JOIN LATERAL (SELECT id,status,part_index,scheduled_at,time_zone,published_id,failure_code FROM publication_jobs WHERE post_id=p.id ORDER BY created_at DESC,id DESC LIMIT 1) j ON true WHERE "+where+" ORDER BY p.created_at DESC, p.id DESC LIMIT 51 OFFSET $1", params);
       const hasMore = result.rows.length > 50;
       res.set('Cache-Control', 'no-store').json({ posts: result.rows.slice(0, 50), nextOffset: hasMore && offset <= Number.MAX_SAFE_INTEGER - 100 ? offset + 50 : null });
-    } catch (error) { next(error); }
+    } catch (error) { if (error instanceof ManagementError) {res.status(error.status).json({error:error.message});return;} next(error); }
   });
   app.post('/api/posts', requireUser, checkCsrf, async (req, res, next) => {
     try {

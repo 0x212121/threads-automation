@@ -8,7 +8,7 @@ import { refreshOneToken } from '../src/threads-token-refresh.js';
 
 test('refresh memperbarui token terenkripsi dan tidak menimpa koneksi ulang', async () => {
   const db = new PGlite();
-  for (const file of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','013_token_refresh.sql']) await db.exec(await readFile(`db/migrations/${file}`,'utf8'));
+  for (const file of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','013_token_refresh.sql','018_workspace_management.sql']) await db.exec(await readFile(`db/migrations/${file}`,'utf8'));
   const query = async (sql: string, params?: unknown[]) => { const result = await db.query(sql,params); return { ...result, rowCount: result.affectedRows ?? result.rows.length }; };
   const pool = { query } as unknown as Pool;
   const vault = new TokenVault(Buffer.alloc(32, 2));

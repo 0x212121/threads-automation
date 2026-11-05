@@ -13,7 +13,7 @@ import { verifyPublishedPart } from '../src/verify-published-part.js';
 
 test('rangkaian berhenti saat hasil balasan tidak pasti dan melanjutkan tanpa mengulang bagian sebelumnya', async () => {
   const db=new PGlite();
-  for (const name of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql','010_publication_resolutions.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql','017_publication_failure_details.sql']) await db.exec(await readFile(`db/migrations/${name}`,'utf8'));
+  for (const name of ['001_content.sql','002_local_identity.sql','007_threads_accounts.sql','009_publication_jobs.sql','010_publication_resolutions.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql','017_publication_failure_details.sql','018_workspace_management.sql']) await db.exec(await readFile(`db/migrations/${name}`,'utf8'));
   const query=async (sql:string,params?:unknown[]) => { const result=await db.query(sql,params); return {...result,rowCount:result.rows.length || result.affectedRows || 0}; };
   const pool={query,connect:async()=>({query,release:()=>{}})} as unknown as Pool;
   const owner='11111111-1111-4111-8111-111111111111',account='22222222-2222-4222-8222-222222222222';

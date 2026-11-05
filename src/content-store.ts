@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { DomainError, nextContentStatus, type ContentStatus, type Role } from './domain.js';
+import { recordAudit } from './audit.js';
 
 type Actor = { id: string; role: Role };
 type Post = { id: string; status: ContentStatus; current_version: number; revision: number };
@@ -49,6 +50,7 @@ export class ContentStore {
       await client.query('INSERT INTO content_versions (post_id, version, body, destination_account_id, created_by, media_id) VALUES ($1, 1, $2, $3, $4, $5)', [id, content.body.trim(), content.destinationAccountId, actor.id, media[0] ?? null]);
       await this.saveMedia(client,id,1,media);
       await this.saveReplies(client,id,1,content.replies ?? []);
+      await recordAudit(client,actor.id,'post.created','post',id,{version:1});
       return result.rows[0]!;
     });
   }
@@ -73,6 +75,7 @@ export class ContentStore {
       await this.saveMedia(client,id,version,media);
       await this.saveReplies(client,id,version,replies);
       const result = await client.query<Post>('UPDATE content_posts SET current_version=$2, status=$3, revision=revision+1, updated_at=now() WHERE id=$1 RETURNING id, status, current_version, revision', [id, version, status]);
+      await recordAudit(client,actor.id,'post.edited','post',id,{version});
       return result.rows[0]!;
     });
   }
@@ -89,13 +92,26 @@ export class ContentStore {
         await client.query('INSERT INTO content_reviews (id, post_id, content_version, reviewer_id, decision) VALUES ($1, $2, $3, $4, $5)', [randomUUID(), id, post.current_version, actor.id, status]);
       }
       const result = await client.query<Post>('UPDATE content_posts SET status=$2, revision=revision+1, updated_at=now() WHERE id=$1 RETURNING id, status, current_version, revision', [id, status]);
+      await recordAudit(client,actor.id,`post.${action}`,'post',id,{version:post.current_version});
       return result.rows[0]!;
+    });
+  }
+
+  async remove(actor:Actor,id:string,expectedRevision:number):Promise<void> {
+    validateActor(actor);
+    await this.transaction(async client=>{
+      const post=await this.lockPost(client,id,expectedRevision);
+      if (post.created_by!==actor.id) throw new PermissionError('Hanya pembuat yang dapat menghapus draft.');
+      if (post.status!=='draft' && post.status!=='rejected') throw new DomainError('Hanya draft atau konten ditolak yang dapat dihapus.');
+      await this.ensureNoPublication(client,id);
+      await client.query('UPDATE content_posts SET deleted_at=now(),deleted_by=$2,revision=revision+1,updated_at=now() WHERE id=$1',[id,actor.id]);
+      await recordAudit(client,actor.id,'post.deleted','post',id,{version:post.current_version});
     });
   }
 
   private async lockPost(client: PoolClient, id: string, expectedRevision: number): Promise<LockedPost> {
     if (!uuidPattern.test(id) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1) throw new DomainError('Identitas atau revisi tidak valid.');
-    const result = await client.query<LockedPost>('SELECT p.id, p.status, p.current_version, p.revision, p.created_by, v.destination_account_id, v.media_id FROM content_posts p JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version WHERE p.id=$1 FOR UPDATE OF p', [id]);
+    const result = await client.query<LockedPost>('SELECT p.id, p.status, p.current_version, p.revision, p.created_by, v.destination_account_id, v.media_id FROM content_posts p JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version WHERE p.id=$1 AND p.deleted_at IS NULL FOR UPDATE OF p', [id]);
     const post = result.rows[0];
     if (!post) throw new DomainError('Konten tidak ditemukan.');
     if (post.revision !== expectedRevision) throw new DomainError('Konten telah berubah; muat ulang sebelum melanjutkan.');

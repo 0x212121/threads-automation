@@ -21,9 +21,9 @@ Aplikasi digunakan secara internal, self-hosted, dengan pengguna berbasis undang
 ## 3. Identitas, undangan dan akses
 
 - Administrator awal yang diinginkan: `wijaya.indra2196@gmail.com`. Operator server membuat akun melalui perintah terminal interaktif satu kali yang disetujui pemilik produk; perintah tidak tersedia melalui HTTP. Kendali terminal server tidak membuktikan kendali email, sehingga email tetap berstatus belum diverifikasi sampai pengguna mengonfirmasi tautan yang dikirim ke alamat tersebut. Pengguna tidak boleh menghubungkan Threads atau menerbitkan konten sampai diverifikasi. Pemulihan kata sandi memakai tautan email sekali pakai yang berlaku satu jam dan membatalkan sesi lama melalui versi sesi.
-- Hanya penerima undangan yang dapat membuat akun lokal; undangan dikirim oleh admin dengan email terverifikasi, berlaku tujuh hari, sekali pakai, dan terikat ke email serta peran yang ditetapkan. Mengirim undangan baru ke alamat yang sama mencabut tautan sebelumnya; pencabutan manual belum tersedia. Penggunaan tautan membuktikan kendali alamat email. Perilaku jika email Google berbeda perlu ditetapkan.
+- Hanya penerima undangan yang dapat membuat akun lokal; undangan dikirim oleh admin dengan email terverifikasi, berlaku tujuh hari, sekali pakai, dan terikat ke email serta peran yang ditetapkan. Mengirim undangan baru ke alamat yang sama mencabut tautan sebelumnya; admin terverifikasi juga dapat mencabut undangan yang belum diterima dan belum kedaluwarsa. Penggunaan tautan membuktikan kendali alamat email. Perilaku jika email Google berbeda perlu ditetapkan.
 - Akun lokal membutuhkan verifikasi email, reset aman dan sesi aman sesuai PRD. Google digunakan untuk masuk aplikasi; otorisasi Threads adalah alur terpisah. Jangan menggabungkan akun hanya berdasarkan kecocokan email; penautan memerlukan bukti kendali kedua identitas.
-- Usulan peran: **Admin** mengelola anggota dan konfigurasi, **Editor** membuat dan mengajukan konten, **Reviewer** menyetujui atau menolak. Hanya admin menghubungkan akun. Pembuat draft, admin, dan reviewer boleh menjadwalkan dan menerbitkan; rincian pemisahan peran lainnya masih perlu disepakati. Periksa izin pada backend untuk UI dan API.
+- Peran yang diterapkan: **Admin** mengelola anggota dan koneksi, **Editor** membuat dan mengajukan konten sendiri, **Reviewer** menyetujui atau menolak. Hanya admin menghubungkan akun. Pembuat draft, admin, dan reviewer boleh menjadwalkan dan menerbitkan; rincian hak konfigurasi/integrasi lainnya masih perlu disepakati. Periksa izin pada backend untuk UI dan API.
 - Identitas integrasi mesin menggunakan kredensial terpisah dari sesi pengguna, dengan hak minimum, pencabutan, rotasi, dan audit. Mekanisme dan cakupan hak per integrasi belum ditentukan.
 
 ## 4. Alur konten dan persetujuan
@@ -100,6 +100,20 @@ Kegagalan saat publikasi menghasilkan event `threads_publish_uncertain`, dengan 
 
 Retensi minimal 90 hari perlu diterjemahkan per jenis data, termasuk log, media, post, audit dan backup, dengan kebijakan penghapusan dan kapasitas 20 GB. Backup dan restore harus diuji; RPO/RTO belum ditetapkan. Monitoring minimal mencakup worker, antrean, keterlambatan, status integrasi, kegagalan notifikasi dan kapasitas. Sediakan prosedur pemulihan serta konfigurasi self-hosting yang dapat direproduksi.
 
+### Pengelolaan ruang kerja
+
+Permintaan pengguna pada 6 November 2026 mencakup pengelolaan anggota, kalender/filter, pengelolaan akun Threads, penghapusan draft, serta riwayat/audit. Seluruh fitur memakai sesi yang diperiksa ulang di server dan CSRF untuk mutasi.
+
+Admin dengan email terverifikasi dapat membaca daftar anggota/undangan, mengubah peran, menonaktifkan/mengaktifkan anggota, dan mencabut undangan. Mutasi anggota memeriksa peran/status sebelumnya agar tidak menimpa perubahan operator lain, mengunci baris pengguna dalam urutan tetap, mempertahankan setidaknya satu admin aktif terverifikasi, melarang penonaktifan diri sendiri dan menaikkan versi sesi. Penonaktifan menghentikan pekerjaan belum diklaim; pekerjaan yang telah dikirim tidak dinyatakan gagal secara sepihak.
+
+Daftar konten memfilter status konten atau pekerjaan terakhir, akun termasuk koneksi historis, dan rentang tanggal pembuatan/jadwal sebelum paginasi. Tanggal diterjemahkan ke batas UTC memakai zona IANA: awal hari pertama inklusif hingga awal hari setelah tanggal akhir eksklusif. Kalender menampilkan bulan berdasarkan jadwal dan zona pilihan, termasuk paginasi, serta tautan ke riwayat. Draft tanpa jadwal tidak dipaksakan menjadi peristiwa kalender.
+
+Hanya admin terverifikasi dapat melihat metadata pengelolaan akun, memeriksa izin token akun terpilih, atau memutuskan koneksi. Pemeriksaan memakai adaptor debug token yang sama dengan CLI, hanya mengembalikan validitas, App ID cocok/tidak diketahui, dan nama scope yang dikenal. Pemutusan bersifat lokal: token dihapus, lease refresh dicabut dan pekerjaan belum diklaim menjadi perlu tindakan. Izin di Meta tidak dicabut oleh endpoint ini; permintaan yang sudah terkirim dapat tetap selesai. Hubungkan ulang memakai OAuth yang sama dan tidak otomatis menjalankan kembali pekerjaan yang dihentikan.
+
+Penghapusan hanya oleh pembuat untuk status draft/ditolak, menggunakan revisi dan penguncian post yang sama dengan perubahan/persetujuan. Publikasi aktif, belum pasti atau bagian terbit memblokir tindakan. `deleted_at/deleted_by` menyembunyikan post dan mencegah edit, transisi, serta publikasi melalui API; data versi/media dipertahankan untuk retensi. Tidak ada penghapusan di Meta atau pembersihan media otomatis.
+
+Riwayat konten dapat dibaca seluruh anggota aktif; setiap bagian (versi/media, review, pekerjaan/bagian, percobaan/kode kegagalan, audit, resolusi, kelanjutan dan pemulihan) memiliki halaman maksimal 50 item dengan offset tersendiri yang dikembalikan API. Audit global hanya untuk admin terverifikasi, tanpa token, hash kata sandi, isi posting, atau respons mentah Meta. Mutasi konten, jadwal, konfirmasi/kelanjutan, koneksi dan anggota dicatat atomik bersama perubahan; pemeriksaan izin mencatat tindakan setelah respons diagnostik diperoleh. Aktivitas sebelum migrasi 018 tidak direkonstruksi; riwayat yang sudah tersimpan tetap dapat dibaca. Retensi/pembersihan otomatis tetap merupakan pekerjaan terpisah.
+
 ## 9. Validasi sebelum implementasi dan rilis
 
 - Buktikan otorisasi dan penerbitan Threads, termasuk media, izin, status token dan batas API yang berlaku.
@@ -117,5 +131,5 @@ Retensi minimal 90 hari perlu diterjemahkan per jenis data, termasuk log, media,
 4. Versi dan konfigurasi instalasi [GoWhatsapp Web Multidevice](https://github.com/aldinokemal/go-whatsapp-web-multidevice) yang digunakan, penerima serta aturan notifikasi.
 5. Hak dan autentikasi API mesin, kontrak endpoint dan kebutuhan integrasi pertama.
 6. Definisi retensi 90 hari per jenis data, penghapusan, backup, serta RPO/RTO.
-7. Pencabutan manual undangan dan prosedur pemulihan akses admin jika email atau SMTP tidak tersedia.
+7. Prosedur pemulihan akses admin jika email atau SMTP tidak tersedia; pencabutan manual undangan sudah tersedia bagi admin terverifikasi.
 8. Aturan deadline retry untuk publikasi langsung, serta definisi operasional toleransi lima menit.

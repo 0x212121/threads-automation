@@ -13,7 +13,7 @@ import { TokenVault } from '../src/token-vault.js';
 test('OAuth Threads terikat pada sesi admin, sekali pakai, dan token tidak terekspos', async t => {
   const logs = t.mock.method(console, 'error', () => {});
   const db = new PGlite();
-  for (const file of ['001_content.sql', '002_local_identity.sql', '006_password_reset.sql', '007_threads_accounts.sql', '008_threads_oauth_states.sql', '013_token_refresh.sql']) await db.exec(await readFile(`db/migrations/${file}`, 'utf8'));
+  for (const file of ['001_content.sql', '002_local_identity.sql', '006_password_reset.sql', '007_threads_accounts.sql', '008_threads_oauth_states.sql', '013_token_refresh.sql','018_workspace_management.sql']) await db.exec(await readFile(`db/migrations/${file}`, 'utf8'));
   const query = async (sql: string, params?: unknown[]) => { const result = await db.query(sql, params); return { ...result, rowCount: result.affectedRows ?? result.rows.length }; };
   const pool = { query, connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
   const password = 'kata sandi untuk pengujian', hash = await hashPassword(password);
