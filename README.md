@@ -61,6 +61,8 @@ Untuk menguji OAuth, jalankan aplikasi melalui HTTPS dengan `APP_ORIGIN` yang se
 
 Callback yang didaftarkan di Meta harus persis `APP_ORIGIN` diikuti `/api/threads/oauth/callback`. Misalnya jika origin `https://contoh-domain.test`, callback adalah `https://contoh-domain.test/api/threads/oauth/callback`. Domain tersebut harus benar-benar mengarah ke aplikasi melalui reverse proxy HTTPS. Hindari mencatat query pada path callback di log proxy karena dapat mengandung kode otorisasi. Meta OAuth dan proxy nyata belum diuji; mode `npm run local` hanya HTTP dan menonaktifkan OAuth. Email admin harus terverifikasi sebelum menghubungkan akun.
 
+Panel **Hubungkan akun Threads** berada di halaman utama setelah masuk. Tombol dapat dipakai oleh admin dengan email terverifikasi setelah konfigurasi Threads tersedia. Panel menjelaskan jika salah satu syarat tersebut belum terpenuhi. Email diverifikasi melalui tombol **Kirim email verifikasi**, yang memerlukan SMTP yang telah dikonfigurasi.
+
 ## Penjadwalan dan penerbitan teks
 
 Fitur ini baru diuji dengan respons Meta simulasi, belum dengan akun Threads atau server PostgreSQL sungguhan. Worker dinonaktifkan secara default, termasuk pada `npm run local`. Setelah mengonfigurasi OAuth, SMTP, HTTPS dan migrasi, operator dapat mengaktifkannya di lingkungan pengujian dengan `PUBLISH_WORKER_ENABLED=true` dan memulai ulang aplikasi. Pastikan konfigurasi Threads lengkap; tombol penjadwalan tidak tersedia saat worker dinonaktifkan. Pengaktifan worker akan memproses pekerjaan yang jatuh tempo.

@@ -1,6 +1,6 @@
 ﻿const $ = selector => document.querySelector(selector);
 const statusLabels = { draft: 'Draft', submitted: 'Menunggu tinjauan', approved: 'Disetujui', rejected: 'Ditolak' };
-let csrf = '', user = null, posts = [], accounts = [], accountsAvailable = true, publishingEnabled = false, nextOffset = null, editing = null, scheduling = null, busy = false;
+let csrf = '', user = null, posts = [], accounts = [], accountsAvailable = true, threadsConfigured = null, publishingEnabled = false, nextOffset = null, editing = null, scheduling = null, busy = false;
 const linkParams = new URLSearchParams(location.hash.slice(1));
 let verificationToken = linkParams.get('verify'), invitationToken = linkParams.get('invite'), resetToken = linkParams.get('reset');
 const threadsResult = linkParams.get('threads');
@@ -32,7 +32,7 @@ function showWorkspace() {
   $('#verified-notice').hidden = user.emailVerified;
   $('#confirm-verification').hidden = !verificationToken || user.emailVerified;
   $('#invite-team').hidden = user.role !== 'admin' || !user.emailVerified;
-  $('#threads-connect-panel').hidden = user.role !== 'admin' || !user.emailVerified;
+  renderThreadsConnection();
   $('#invitation-pending').hidden = !invitationToken;
   $('#reset-pending').hidden = !resetToken;
   if (threadsResult === 'connected') errorAt('#verification-status', 'Akun Threads berhasil dihubungkan.');
@@ -49,8 +49,22 @@ async function loadPosts(append = false) {
   finally { $('#loading').hidden = true; }
 }
 async function loadAccounts() {
-  try { const result = await api('/api/threads/accounts'); accounts = result.accounts; accountsAvailable = true; const config = await api('/api/threads/config'); publishingEnabled = config.publishingEnabled === true; $('#connect-threads').hidden = !config.configured; $('#threads-config-message').hidden = config.configured; }
-  catch (error) { if (error.status === 401) throw error; accounts = []; accountsAvailable = false; }
+  threadsConfigured = null; publishingEnabled = false; renderThreadsConnection();
+  try { const result = await api('/api/threads/accounts'); accounts = result.accounts; accountsAvailable = true; const config = await api('/api/threads/config'); threadsConfigured = config.configured === true; publishingEnabled = config.publishingEnabled === true; }
+  catch (error) { if (error.status === 401) throw error; accounts = []; accountsAvailable = false; threadsConfigured = 'error'; }
+  finally { if (user) renderThreadsConnection(); }
+}
+function renderThreadsConnection() {
+  const button = $('#connect-threads'), message = $('#threads-config-message');
+  button.disabled = !user || user.role !== 'admin' || !user.emailVerified || threadsConfigured !== true;
+  message.hidden = false;
+  if (!user) message.textContent = 'Masuk untuk melihat koneksi Threads.';
+  else if (user.role !== 'admin') message.textContent = 'Hanya admin yang dapat menghubungkan akun Threads.';
+  else if (!user.emailVerified) message.textContent = 'Verifikasi email administrator untuk menghubungkan akun Threads.';
+  else if (threadsConfigured === null) message.textContent = 'Memeriksa koneksi Threads...';
+  else if (threadsConfigured === 'error') message.textContent = 'Status koneksi tidak dapat diperiksa. Muat ulang halaman dan coba lagi.';
+  else if (!threadsConfigured) message.textContent = 'Koneksi belum dikonfigurasi. Atur THREADS_APP_ID, THREADS_APP_SECRET, dan THREADS_TOKEN_KEY di server.';
+  else message.hidden = true;
 }
 function render() {
   const filter = $('#filter').value;
@@ -190,7 +204,7 @@ $('#confirm-email').addEventListener('click', async () => {
   const button = $('#confirm-email'); button.disabled = true; errorAt('#verification-status', '');
   try {
     await api('/api/auth/verification/confirm', { method: 'POST', body: JSON.stringify({ token: verificationToken }) });
-    verificationToken = null; user.emailVerified = true; $('#confirm-verification').hidden = true; $('#verified-notice').hidden = true; $('#invite-team').hidden = user.role !== 'admin'; $('#threads-connect-panel').hidden = user.role !== 'admin';
+    verificationToken = null; user.emailVerified = true; $('#confirm-verification').hidden = true; $('#verified-notice').hidden = true; $('#invite-team').hidden = user.role !== 'admin'; renderThreadsConnection();
     errorAt('#verification-status', 'Email berhasil diverifikasi.');
   } catch (error) { errorAt('#verification-status', error.message); }
   finally { button.disabled = false; }
