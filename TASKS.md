@@ -70,6 +70,8 @@ Status awal: perencanaan. Kotak belum dicentang bukan klaim bahwa pekerjaan suda
 
 ## 5. API dan kesiapan rilis
 
+- [x] Ringkas daftar konten menjadi tiga baris dan jumlah bagian/media, dengan dialog isi lengkap. Jangan memasang sumber video secara otomatis pada daftar, detail, atau editor; uji rangkaian, carousel, dan pemutar sesuai pilihan pengguna.
+
 - [x] Terapkan permintaan fitur 1/2/4/5/6: daftar/ubah peran/nonaktif/aktif anggota, pencabutan undangan, kalender/filter server, status/izin/pemutusan lokal akun Threads, hapus draft oleh pembuat, serta riwayat dan audit (migrasi 018). Uji API untuk akses, CSRF, pencabutan sesi, admin terakhir, revisi, tanggal/zona dan pelestarian hasil publikasi; uji browser dengan data sintetis pada desktop/ponsel. Validasi deployment dan Meta/SMTP nyata untuk fitur baru tetap diperlukan.
 
 - [ ] Tetapkan kontrak API integrasi, hak, autentikasi, idempotensi, versi, error dan dokumentasi OpenAPI yang tervalidasi.

@@ -119,15 +119,15 @@ function render() {
   for (const post of visible) {
     const row = $('#post-template').content.firstElementChild.cloneNode(true);
     row.querySelector('.post-text').textContent = post.body || (post.media_kind === 'VIDEO' ? 'Post video' : 'Post gambar');
-    let mediaAnchor = row.querySelector('.post-text');
-    for (const item of post.media || (post.media_id ? [{id:post.media_id,kind:post.media_kind}] : [])) {
-      const preview = document.createElement(item.kind === 'IMAGE' ? 'img' : 'video');
-      preview.src = `/api/media/${encodeURIComponent(item.id)}/content`; preview.width = 160; preview.height = 120; preview.className = 'media-preview';
-      if (item.kind === 'IMAGE') { preview.alt = 'Lampiran gambar'; preview.loading = 'lazy'; }
-      else { preview.controls = true; preview.preload = 'metadata'; }
-      mediaAnchor.after(preview); mediaAnchor = preview;
+    const media=postMedia(post),firstImage=media.find(item=>item.kind==='IMAGE');
+    if (firstImage) {
+      const preview=document.createElement('img');preview.src=mediaUrl(firstImage.id);preview.width=80;preview.height=60;
+      preview.className='post-thumbnail';preview.alt='Gambar pertama';preview.loading='lazy';row.querySelector('.post-text').after(preview);
     }
-    for (const [index,reply] of (post.replies || []).entries()) { const line=document.createElement('p'); line.textContent=`Bagian ${index+2}: ${reply}`; mediaAnchor.after(line); mediaAnchor=line; }
+    const counts=[];
+    if (post.replies?.length) counts.push(`${post.replies.length+1} bagian`);
+    if (media.length) counts.push(media[0].kind==='VIDEO' ? '1 video' : `${media.length} gambar`);
+    if (counts.length) row.querySelector('.post-created').before(textElement('p',counts.join(' · '),'post-summary'));
     const created = new Date(post.created_at);
     row.querySelector('.post-created').textContent = `${Number.isNaN(created.getTime()) ? '' : `Dibuat ${new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(created)}`}${post.destination_username ? ` · @${post.destination_username}` : ''}`;
     const status = row.querySelector('.status'); status.textContent = statusLabels[post.status] || post.status; status.classList.add(post.status);
@@ -150,6 +150,7 @@ function render() {
     const mayManage = own || user.role === 'admin' || user.role === 'reviewer';
     const mayPublish = user.emailVerified && mayManage;
     const accountReady=accountsAvailable && accounts.some(account=>account.id===post.destination_account_id);
+    addAction(actions,'Lihat lengkap',()=>openPostDetail(post));
     addAction(actions,'Riwayat',()=>openHistory(post));
     if (own && ['draft','rejected'].includes(post.status) && !blocked) addAction(actions,'Hapus draft',()=>deleteDraft(post));
     if (own && post.status !== 'submitted' && !blocked) addAction(actions, 'Ubah', () => openEditor(post));
@@ -178,6 +179,42 @@ function addAction(container, label, fn) {
   const button = document.createElement('button'); button.type = 'button'; button.className = 'action'; button.textContent = label; button.disabled = busy;
   button.addEventListener('click', fn); container.append(button);
 }
+function postMedia(post) {return post.media?.length ? post.media : post.media_id ? [{id:post.media_id,kind:post.media_kind}] : [];}
+function mediaUrl(id) {return `/api/media/${encodeURIComponent(id)}/content`;}
+function clearVideos(container) {
+  for (const video of container.querySelectorAll('video')) {video.pause();video.removeAttribute('src');video.load();}
+}
+function addVideoPreview(container,source) {
+  const button=document.createElement('button');button.type='button';button.className='secondary video-preview-button';button.textContent='Tampilkan pemutar video';
+  button.addEventListener('click',()=>{
+    const video=document.createElement('video');video.className='media-preview';video.width=320;video.height=240;video.controls=true;video.preload='none';
+    video.src=source();button.replaceWith(video);video.focus();
+  });
+  container.append(button);
+}
+function openPostDetail(post) {
+  if (busy) return;
+  const content=$('#detail-content');content.replaceChildren();
+  const parts=[post.body,...(post.replies || [])];
+  parts.forEach((part,index)=>{
+    const section=document.createElement('section');section.className='detail-part';
+    section.append(textElement('h3',`Bagian ${index+1} dari ${parts.length}`),textElement('p',part || 'Posting media','detail-body'));
+    content.append(section);
+  });
+  const media=postMedia(post);
+  if (media.length) {
+    const section=document.createElement('section');section.className='detail-media';
+    section.append(textElement('h3',media[0].kind==='VIDEO' ? 'Video' : `${media.length} gambar`));
+    media.forEach((item,index)=>{
+      if (item.kind==='VIDEO') addVideoPreview(section,()=>mediaUrl(item.id));
+      else {const image=document.createElement('img');image.className='media-preview';image.width=320;image.height=240;image.loading='lazy';image.alt=`Gambar ${index+1}`;image.src=mediaUrl(item.id);section.append(image);}
+    });
+    content.append(section);
+  }
+  $('#detail-dialog').showModal();
+}
+$('#close-detail').addEventListener('click',()=>$('#detail-dialog').close());
+$('#detail-dialog').addEventListener('close',()=>{clearVideos($('#detail-content'));$('#detail-content').replaceChildren();});
 async function transition(post, action) {
   if (busy) return;
   setBusy(true); errorAt('#workspace-error', '');
@@ -221,17 +258,17 @@ function splitPost() {
 $('#split-post').addEventListener('click',splitPost);
 $('#add-reply').addEventListener('click',() => { const replies=readReplies(); if (replies.length>=9) { errorAt('#form-error','Maksimal 10 bagian dalam satu rangkaian.'); return; } renderReplies([...replies,'']); });
 function renderEditorMedia() {
+  clearVideos($('#media-preview'));
   for (const url of previewObjectUrls) URL.revokeObjectURL(url); previewObjectUrls = [];
   const container = $('#media-preview'); container.replaceChildren();
   $('#remove-media').hidden = !editorMedia.length;
   editorMedia.forEach((item,index) => {
     const wrapper = document.createElement('div');
-    const element = document.createElement(item.kind === 'IMAGE' ? 'img' : 'video');
-    if (item.file) { const url = URL.createObjectURL(item.file); previewObjectUrls.push(url); element.src = url; }
-    else element.src = `/api/media/${encodeURIComponent(item.id)}/content`;
-    element.width = 160; element.height = 120; element.className = 'media-preview';
-    if (item.kind === 'IMAGE') element.alt = `Lampiran ${index+1}`; else { element.controls = true; element.preload = 'metadata'; }
-    wrapper.append(element);
+    const source=()=>{if (!item.file) return mediaUrl(item.id);const url=URL.createObjectURL(item.file);previewObjectUrls.push(url);return url;};
+    if (item.kind==='VIDEO') addVideoPreview(wrapper,source);
+    else {
+      const element=document.createElement('img');element.src=source();element.width=160;element.height=120;element.className='media-preview';element.alt=`Lampiran ${index+1}`;wrapper.append(element);
+    }
     if (editorMedia.length > 1) {
       const label=document.createElement('span'); label.textContent=`Gambar ${index+1}`; wrapper.append(label);
       for (const [text,offset] of [['Naik',-1],['Turun',1],['Hapus',0]]) {
@@ -269,7 +306,7 @@ async function cleanupUnusedMedia() {
   return success;
 }
 $('#editor').addEventListener('cancel', event => { event.preventDefault(); void closeEditor(); });
-$('#editor').addEventListener('close', () => { for (const url of previewObjectUrls) URL.revokeObjectURL(url); previewObjectUrls = []; });
+$('#editor').addEventListener('close', () => { clearVideos($('#media-preview'));$('#media-preview').replaceChildren();for (const url of previewObjectUrls) URL.revokeObjectURL(url); previewObjectUrls = []; });
 function openSchedule(post) {
   scheduling = post; $('#schedule-form').reset();
   $('#schedule-title').textContent = post.job_status === 'scheduled' ? 'Ubah jadwal' : 'Jadwalkan posting';

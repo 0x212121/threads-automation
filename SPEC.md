@@ -102,6 +102,8 @@ Retensi minimal 90 hari perlu diterjemahkan per jenis data, termasuk log, media,
 
 ### Pengelolaan ruang kerja
 
+Daftar konten menampilkan maksimal tiga baris bagian pertama, jumlah bagian dan media, serta satu gambar kecil jika tersedia. Isi lengkap, bagian rangkaian, dan seluruh gambar dibuka dalam dialog. Video tidak dimasukkan ke daftar dan sumber video pada dialog atau editor baru dipasang setelah pengguna memilih menampilkan pemutar; pemutar memakai `preload=none`. Pratinjau gambar kecil masih menggunakan berkas gambar asli, bukan thumbnail server terpisah.
+
 Permintaan pengguna pada 6 November 2026 mencakup pengelolaan anggota, kalender/filter, pengelolaan akun Threads, penghapusan draft, serta riwayat/audit. Seluruh fitur memakai sesi yang diperiksa ulang di server dan CSRF untuk mutasi.
 
 Admin dengan email terverifikasi dapat membaca daftar anggota/undangan, mengubah peran, menonaktifkan/mengaktifkan anggota, dan mencabut undangan. Mutasi anggota memeriksa peran/status sebelumnya agar tidak menimpa perubahan operator lain, mengunci baris pengguna dalam urutan tetap, mempertahankan setidaknya satu admin aktif terverifikasi, melarang penonaktifan diri sendiri dan menaikkan versi sesi. Penonaktifan menghentikan pekerjaan belum diklaim; pekerjaan yang telah dikirim tidak dinyatakan gagal secara sepihak.

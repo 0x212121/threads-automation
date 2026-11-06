@@ -39,8 +39,10 @@ try {
   await content.transition(actor,scheduled.id,1,'submit');await content.transition(actor,scheduled.id,2,'approve');
   const schedule=new Date(Date.now()+86400000),job=randomUUID();
   await query("INSERT INTO publication_jobs(id,post_id,content_version,account_id,requested_by,status,scheduled_at,time_zone,next_attempt_at) VALUES ($1,$2,1,$3,$4,'scheduled',$5,'Asia/Makassar',$5)",[job,scheduled.id,account,admin,schedule]);
-  const longHistory=await content.create(actor,{body:'Versi uji 1',destinationAccountId:account});
-  for (let version=2;version<=55;version++) await content.edit(actor,longHistory.id,version-1,{body:`Versi uji ${version}`});
+  const videoId=randomUUID();
+  await query("INSERT INTO media_assets(id,uploaded_by,kind,byte_size,width,height,duration_seconds) VALUES ($1,$2,'VIDEO',100,320,240,5)",[videoId,admin]);
+  const longHistory=await content.create(actor,{body:'Versi uji 1',destinationAccountId:account,mediaId:videoId,replies:['Bagian kedua untuk pemeriksaan.']});
+  for (let version=2;version<=55;version++) await content.edit(actor,longHistory.id,version-1,{body:version===55 ? `Versi uji 55\n${'Teks panjang untuk pemeriksaan daftar. '.repeat(8)}` : `Versi uji ${version}`});
   await content.create(actor,{body:'Draft untuk dihapus melalui UI',destinationAccountId:account});
   let app;
   server=createServer((req,res)=>app(req,res));await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -63,17 +65,24 @@ try {
   const command=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const id=++counter;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params,...(sessionId ? {sessionId} : {})}));});
   const {targetId}=await command('Target.createTarget',{url:origin}),{sessionId}=await command('Target.attachToTarget',{targetId,flatten:true});
   const cdp=(method,params)=>command(method,params,sessionId);
-  await cdp('Runtime.enable');await cdp('Page.enable');
+  await cdp('Runtime.enable');await cdp('Page.enable');await cdp('Network.enable');
   const evaluate=async expression=>{const r=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw new Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
   const until=async expression=>{const end=Date.now()+10000;while(!await evaluate(expression)){if(Date.now()>end)throw new Error(`UI did not reach: ${expression}`);await delay(40);}};
   const click=selector=>evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
   const action=(container,label)=>evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(container)})).find(e=>e.textContent===${JSON.stringify(label)}).click()`);
   await cdp('Page.addScriptToEvaluateOnNewDocument',{source:'window.confirm=()=>true;'});await cdp('Page.reload');
-  await until("document.querySelector('#login-screen').hidden===false");
+  await until("document.querySelector('#login-screen')?.hidden===false");
   await evaluate(`document.querySelector('#email').value='admin@example.test';document.querySelector('#password').value=${JSON.stringify(password)};document.querySelector('#login-form').requestSubmit();`);
   await until("!document.querySelector('#workspace').hidden && document.querySelector('#loading').hidden");
   await until("document.querySelectorAll('#post-list .post-row').length===50");await click('#load-more');await until("document.querySelectorAll('#post-list .post-row').length===54");checks.push('Content pagination');
   await action('#post-list .action','Hapus draft');await until("!document.querySelector('#post-list').textContent.includes('Draft untuk dihapus melalui UI')");checks.push('Confirmed draft deletion');
+  const videoRequests=()=>events.filter(event=>event.method==='Network.requestWillBeSent' && event.params.request.url.includes(`/api/media/${videoId}/content`));
+  assert.equal(videoRequests().length,0);assert.equal(await evaluate("document.querySelector('#post-list video')===null"),true);
+  await action('#post-list .action','Lihat lengkap');assert.equal(await evaluate("document.querySelector('#detail-content').textContent.includes('Bagian kedua untuk pemeriksaan.')"),true);
+  assert.equal(await evaluate("document.querySelector('#detail-content video')===null"),true);await delay(200);assert.equal(videoRequests().length,0);
+  await action('#detail-content button','Tampilkan pemutar video');assert.equal(await evaluate("document.querySelector('#detail-content video').preload"),'none');
+  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await until("!document.querySelector('#detail-dialog').open");
+  await action('#post-list .action','Ubah');assert.equal(await evaluate("document.querySelector('#media-preview video')===null"),true);await delay(200);assert.equal(videoRequests().length,0);await click('#cancel-editor');checks.push('Compact content, complete thread and no automatic video request');
   await action('#post-list .action','Riwayat');await until("document.querySelectorAll('#history-versions article').length===50");await click('#history-more');await until("document.querySelectorAll('#history-versions article').length===55");
   await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await until("!document.querySelector('#history-dialog').open");checks.push('Version/audit history pagination and keyboard Escape');
   await click('[data-panel="calendar"]');await evaluate(`document.querySelector('#calendar-month').value=${JSON.stringify(schedule.toISOString().slice(0,7))};document.querySelector('#calendar-month').dispatchEvent(new Event('change'));`);
@@ -104,7 +113,9 @@ try {
   for (const [width,height] of [[1440,1000],[390,844]]) {
     await cdp('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<640});
     for (const panel of ['content','calendar','team','accounts','audit']) {
-      await click(`[data-panel="${panel}"]`);await delay(250);await evaluate(`document.querySelector(${JSON.stringify(panel==='content' ? '#konten' : `#${panel}-panel`)}).scrollIntoView({block:'start'})`);
+      await click(`[data-panel="${panel}"]`);
+      if (panel==='content') {await evaluate("document.querySelector('#content-filters').reset();refreshContentView()");await until("document.querySelector('#post-list .post-text')?.textContent.startsWith('Versi uji 55')");}
+      await delay(250);await evaluate(`document.querySelector(${JSON.stringify(panel==='content' ? '#konten' : `#${panel}-panel`)}).scrollIntoView({block:'start'})`);
       assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true,`Horizontal overflow: ${panel} at ${width}px`);
       const failures=await evaluate(`(()=>{
         const rgb=value=>{const values=value.match(/[\\d.]+/g)?.map(Number);return values?.length>=3 ? values : [0,0,0,0];};
@@ -121,6 +132,12 @@ try {
       contrastFailures.push(...failures.map(failure=>({...failure,panel,width})));
       const image=await cdp('Page.captureScreenshot',{format:'png'}),name=`workspace-${panel}-${width}.png`;
       await writeFile(join(folder,name),Buffer.from(image.data,'base64'));screenshots.push(name);
+      if (panel==='content') {
+        assert.equal(await evaluate("(()=>{const p=document.querySelector('#post-list .post-text'),style=getComputedStyle(p);return style.webkitLineClamp==='3' && p.clientHeight<=parseFloat(style.lineHeight)*3+1;})()"),true);
+        await action('#post-list .action','Lihat lengkap');
+        const detail=await cdp('Page.captureScreenshot',{format:'png'}),detailName=`content-detail-${width}.png`;
+        await writeFile(join(folder,detailName),Buffer.from(detail.data,'base64'));screenshots.push(detailName);await click('#close-detail');
+      }
     }
   }
   checks.push('Desktop/mobile overflow checks across five panels');
