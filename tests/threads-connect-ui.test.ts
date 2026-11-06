@@ -24,6 +24,7 @@ for (const scenario of ['ready', 'unverified', 'missing-config', 'server-error',
         let value: unknown = {}, status = 200;
         if (path === '/api/auth/csrf') value = { csrfToken: 'csrf-test' };
         else if (path === '/api/auth/me') value = { user: { id: 'admin', role: 'admin', email: 'admin@example.test', emailVerified: scenario !== 'unverified' && (scenario !== 'verified-elsewhere' || clicks) } };
+        else if (path === '/api/team/settings') value = {timeZone:'Asia/Makassar',revision:1};
         else if (path === '/api/threads/config') value = { configured: scenario !== 'missing-config', publishingEnabled: false };
         else if (path === '/api/threads/accounts') value = { accounts: [] };
         else if (path.startsWith('/api/posts')) value = { posts: [], nextOffset: null };

@@ -108,11 +108,12 @@ Pengiriman email transaksional untuk verifikasi dan reset adalah dependensi MVP.
 | POST-04 | Publikasikan sekarang. | Setelah persetujuan sesuai kebijakan tim, permintaan masuk antrean dan menampilkan status pemrosesan; hasil sukses atau gagal tercatat. Klik berulang tidak membuat permintaan publikasi baru untuk posting yang sama. |
 | POST-05 | Jadwalkan posting. | Post hanya diproses setelah disetujui sesuai kebijakan tim. Tanggal dan waktu masa depan serta zona waktu tersimpan; dashboard menampilkan waktu lokal pilihan dan informasi zona waktu. Jadwal dapat diubah atau dibatalkan sebelum pemrosesan dimulai, sesuai kebijakan persetujuan. |
 | POST-06 | Hapus draft. | Pengguna dapat menghapus draft setelah konfirmasi. Data tidak lagi muncul dalam daftar; kebijakan retensi berkas mengikuti kebijakan penyimpanan. |
+| POST-09 | Duplikasi konten. | Anggota aktif dapat menyalin konten tim menjadi draft baru miliknya, termasuk teks, balasan, dan media; salinan memerlukan persetujuan baru dan tidak menyalin jadwal atau hasil publikasi. |
 | POST-07 | Hasil posting. | Jika berhasil, simpan ID dan tautan posting Threads jika tersedia; pengguna dapat membukanya dari riwayat. |
 
 ### 6.4 Penjadwalan dan keandalan
 
-- Jadwal disimpan sebagai waktu UTC bersama zona waktu pilihan pengguna; antarmuka menampilkan waktu sesuai zona tersebut. Waktu lokal yang tidak ada atau ambigu akibat perubahan zona waktu harus ditolak atau diminta konfirmasi eksplisit.
+- Jadwal disimpan sebagai waktu UTC bersama zona waktu saat dijadwalkan. Satu zona waktu tim diatur admin terverifikasi dan digunakan untuk tampilan serta jadwal baru di UI; perubahan pengaturan tidak menggeser jadwal yang sudah ada. Waktu lokal yang tidak ada atau ambigu akibat perubahan zona waktu harus ditolak atau diminta konfirmasi eksplisit.
 - Status minimal: **Draft → Diajukan → Disetujui / Ditolak**, lalu posting yang disetujui dapat menjadi **Terjadwal → Diproses → Terbit / Gagal / Perlu tindakan**. Publikasi sekarang yang telah disetujui masuk ke **Diproses**. **Hasil belum pasti** digunakan jika respons penerbitan tidak dapat dipastikan; status ini tidak otomatis dianggap gagal.
 - Worker mengambil pekerjaan secara atomik dengan lease dan pemulihan saat proses terhenti. Pembatalan/perubahan hanya dijamin sebelum pekerjaan diklaim; UI memberi tahu bila sudah diproses.
 - Kegagalan sementara yang diketahui aman untuk diulang memakai retry terbatas dan backoff. Kegagalan permanen, izin tidak memadai, atau token kedaluwarsa masuk **Gagal** atau **Perlu tindakan**, dengan pesan yang dapat ditindaklanjuti.
@@ -121,6 +122,8 @@ Pengiriman email transaksional untuk verifikasi dan reset adalah dependensi MVP.
 - Catat waktu jadwal, setiap percobaan, hasil, dan alasan yang aman ditampilkan. Percobaan otomatis tidak dimulai setelah satu jam dari waktu jadwal; pekerjaan yang belum dikirim setelah tenggat ditandai **Perlu tindakan**. Hasil penerbitan yang sudah dikirim tetap direkonsiliasi.
 
 ### 6.5 Dashboard, kalender, dan notifikasi
+
+Halaman Konten Tim menyediakan pencarian isi dan bagian rangkaian, filter cepat, filter lanjutan, serta ringkasan dari data yang sesuai dengan filter non-status. Status persetujuan ditampilkan terpisah dari status publikasi, termasuk progres rangkaian jika baru sebagian terbit.
 
 | ID | Kebutuhan | Kriteria penerimaan |
 |---|---|---|

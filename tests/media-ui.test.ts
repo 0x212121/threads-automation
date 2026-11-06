@@ -22,6 +22,7 @@ test('komposer mengunggah lampiran, menangani kegagalan simpan, dan membersihkan
       let value:unknown={},status=200;
       if (path==='/api/auth/csrf') value={csrfToken:'test-csrf'};
       else if (path==='/api/auth/me') value={user:{id:'user1',email:'admin@example.test',role:'admin',emailVerified:true}};
+      else if (path==='/api/team/settings') value={timeZone:'Asia/Makassar',revision:1};
       else if (path==='/api/threads/accounts') value={accounts:[]};
       else if (path==='/api/threads/config') value={configured:false,publishingEnabled:false};
       else if (path.startsWith('/api/posts?')) value={posts,nextOffset:null};
@@ -80,6 +81,7 @@ test('komposer membagi teks dan menyimpan urutan carousel pada draft', async () 
       let data:unknown={}, status=200;
       if (path==='/api/auth/csrf') data={csrfToken:'csrf'};
       else if (path==='/api/auth/me') data={user:{id:'user1',email:'a@example.test',role:'admin',emailVerified:true}};
+      else if (path==='/api/team/settings') data={timeZone:'Asia/Makassar',revision:1};
       else if (path==='/api/threads/accounts') data={accounts:[]};
       else if (path==='/api/threads/config') data={configured:false,publishingEnabled:false};
       else if (path.startsWith('/api/posts?')) data={posts:[],nextOffset:null};

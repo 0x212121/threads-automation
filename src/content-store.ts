@@ -55,6 +55,20 @@ export class ContentStore {
     });
   }
 
+  async duplicate(actor: Actor, sourceId: string, expectedRevision: number): Promise<Post> {
+    validateActor(actor);
+    return this.transaction(async client => {
+      const source = await this.lockPost(client, sourceId, expectedRevision);
+      const id=randomUUID();
+      const result=await client.query<Post>("INSERT INTO content_posts (id,created_by,status,current_version) VALUES ($1,$2,'draft',1) RETURNING id,status,current_version,revision",[id,actor.id]);
+      await client.query("INSERT INTO content_versions(post_id,version,body,destination_account_id,created_by,media_id) SELECT $1,1,v.body,CASE WHEN a.status='active' AND a.token_expires_at>now() THEN v.destination_account_id ELSE NULL END,$2,v.media_id FROM content_versions v LEFT JOIN threads_accounts a ON a.id=v.destination_account_id WHERE v.post_id=$3 AND v.version=$4",[id,actor.id,sourceId,source.current_version]);
+      await client.query('INSERT INTO content_version_media(post_id,version,position,media_id) SELECT $1,1,position,media_id FROM content_version_media WHERE post_id=$2 AND version=$3',[id,sourceId,source.current_version]);
+      await client.query('INSERT INTO content_version_replies(post_id,version,position,body) SELECT $1,1,position,body FROM content_version_replies WHERE post_id=$2 AND version=$3',[id,sourceId,source.current_version]);
+      await recordAudit(client,actor.id,'post.duplicated','post',id,{version:1,sourcePostId:sourceId});
+      return result.rows[0]!;
+    });
+  }
+
   async edit(actor: Actor, id: string, expectedRevision: number, content: ContentEdit): Promise<Post> {
     validateActor(actor); validateContent(content);
     return this.transaction(async client => {
@@ -125,7 +139,7 @@ export class ContentStore {
   private async checkMedia(client: PoolClient, ids: string[], userId: string, body: string) {
     if (!body.trim() && !ids.length) throw new DomainError('Isi teks atau lampirkan media.');
     for (const id of [...ids].sort()) {
-      const result = await client.query<{kind: string}>('SELECT kind FROM media_assets WHERE id=$1 AND uploaded_by=$2 FOR SHARE', [id,userId]);
+      const result = await client.query<{kind: string}>('SELECT m.kind FROM media_assets m WHERE m.id=$1 AND (m.uploaded_by=$2 OR EXISTS (SELECT 1 FROM content_version_media cm JOIN content_posts p ON p.id=cm.post_id WHERE cm.media_id=m.id AND p.created_by=$2 AND p.deleted_at IS NULL)) FOR SHARE OF m', [id,userId]);
       if (!result.rows[0]) throw new DomainError('Media tidak ditemukan atau bukan milik pembuat draft.');
       if (ids.length > 1 && result.rows[0].kind !== 'IMAGE') throw new DomainError('Carousel hanya mendukung gambar.');
     }

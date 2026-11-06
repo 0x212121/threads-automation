@@ -19,6 +19,24 @@ export function managementRoutes(app:Express,options:Options,requireUser:Request
       next(error);
     }
   };
+  app.get('/api/team/settings',requireUser,safe(async(_req,res)=>{
+    const result=await options.pool.query('SELECT time_zone AS "timeZone",revision FROM team_settings LIMIT 1');
+    if (!result.rows[0]) throw new ManagementError('Pengaturan tim tidak tersedia.',503);
+    res.set('Cache-Control','no-store').json(result.rows[0]);
+  }));
+  app.put('/api/team/settings',requireUser,checkCsrf,requireAdmin,safe(async(req,res)=>{
+    const data=req.body;
+    if (!data || typeof data!=='object' || Array.isArray(data) || Object.keys(data).some(key=>!['timeZone','revision'].includes(key)) || typeof data.timeZone!=='string' || data.timeZone.length>100 || !/^[A-Za-z_]+(?:\/[A-Za-z0-9_+.-]+)*$/.test(data.timeZone) || !Number.isSafeInteger(data.revision) || data.revision<1) throw new ManagementError('Zona waktu atau revisi tidak valid.',400);
+    try {new Intl.DateTimeFormat('en',{timeZone:data.timeZone}).format();} catch {throw new ManagementError('Gunakan zona waktu IANA yang valid.',400);}
+    const client=await options.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result=await client.query('UPDATE team_settings SET time_zone=$1,revision=revision+1 WHERE revision=$2 RETURNING id,time_zone AS "timeZone",revision',[data.timeZone,data.revision]);
+      if (!result.rows[0]) throw new ManagementError('Pengaturan telah berubah. Muat ulang sebelum menyimpan.',409);
+      await recordAudit(client,res.locals.user.id,'team_settings.updated','team_settings',result.rows[0].id,{timeZone:data.timeZone});
+      await client.query('COMMIT');res.set('Cache-Control','no-store').json({timeZone:result.rows[0].timeZone,revision:result.rows[0].revision});
+    } catch (error) {await client.query('ROLLBACK');throw error;} finally {client.release();}
+  }));
   app.get('/api/team/members',requireUser,requireAdmin,safe(async(req,res)=>{
     const offset=offsetOf(req.query.offset),result=await options.pool.query('SELECT id,email,role,email_verified_at,disabled_at,created_at FROM local_users ORDER BY created_at,id LIMIT 51 OFFSET $1',[offset]);
     res.set('Cache-Control','no-store').json({members:result.rows.slice(0,50),nextOffset:result.rows.length>50 ? offset+50 : null});

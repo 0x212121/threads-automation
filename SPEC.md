@@ -34,6 +34,8 @@ Persetujuan harus terikat pada versi konten dan akun tujuan. Perubahan yang meme
 
 MVP mendukung teks, satu video, atau hingga sepuluh gambar; dua atau lebih gambar membentuk carousel. Draft juga dapat berisi sampai sepuluh bagian berurutan yang diterbitkan sebagai balasan; lampiran berada pada bagian pertama. Pemecahan otomatis dan penyuntingan manual tersedia di komposer. Seluruh teks, urutan, lampiran dan akun tujuan terikat pada versi yang disetujui. Berkas divalidasi memakai batas aplikasi yang dijelaskan di README, dan Meta tetap memvalidasi pembatasan lainnya.
 
+Anggota aktif dapat menduplikasi konten tim menjadi draft miliknya. Operasi mengunci dan memeriksa revisi sumber, mempertahankan teks, balasan dan referensi media yang sama, dan mengosongkan akun tujuan jika tidak aktif. Salinan tidak memiliki review, jadwal, pekerjaan, atau hasil publikasi; harus diajukan dan disetujui secara normal. Media yang dibagikan melalui draft salinan tetap dapat dipakai oleh pembuat salinan tanpa menyalin berkas atau mengubah kepemilikan unggahan. Duplikasi sumber dengan hasil belum pasti menampilkan peringatan untuk memeriksa Threads.
+
 ## 5. Penjadwalan dan publikasi
 
 1. Simpan waktu jadwal sebagai UTC dan simpan zona waktu IANA yang dipilih; validasi waktu lokal yang ambigu atau tidak ada.
@@ -117,6 +119,8 @@ Penghapusan hanya oleh pembuat untuk status draft/ditolak, menggunakan revisi da
 Riwayat konten dapat dibaca seluruh anggota aktif; setiap bagian (versi/media, review, pekerjaan/bagian, percobaan/kode kegagalan, audit, resolusi, kelanjutan dan pemulihan) memiliki halaman maksimal 50 item dengan offset tersendiri yang dikembalikan API. Audit global hanya untuk admin terverifikasi, tanpa token, hash kata sandi, isi posting, atau respons mentah Meta. Mutasi konten, jadwal, konfirmasi/kelanjutan, koneksi dan anggota dicatat atomik bersama perubahan; pemeriksaan izin mencatat tindakan setelah respons diagnostik diperoleh. Aktivitas sebelum migrasi 018 tidak direkonstruksi; riwayat yang sudah tersimpan tetap dapat dibaca. Retensi/pembersihan otomatis tetap merupakan pekerjaan terpisah.
 
 ## 9. Validasi sebelum implementasi dan rilis
+
+Perubahan antarmuka Konten Tim: navigasi pengelolaan berada di sidebar; koneksi Threads berada pada panel akun untuk admin terverifikasi. Daftar menampilkan status publikasi terpisah dari persetujuan dan jumlah bagian yang sudah terbit berdasarkan indeks pekerjaan. Pencarian literal tidak membedakan kapital dan mencakup isi serta balasan versi saat ini sebelum paginasi. Ringkasan menghitung semua konten yang cocok dengan pencarian, akun, dan tanggal, tanpa filter status; pilihan angka menerapkan filter status. Filter lanjutan dan aksi sekunder dapat dibuka sesuai kebutuhan. Zona waktu tim berlaku untuk tampilan, filter dan jadwal baru melalui UI; zona dan UTC jadwal lama tetap tersimpan. Admin terverifikasi dapat mengubah zona IANA melalui Pengaturan, dengan revisi untuk mencegah perubahan bersamaan saling menimpa dan audit. Default instalasi mengikuti nilai UI sebelumnya, Asia/Makassar. API penjadwalan tetap menerima zona eksplisit pada setiap permintaan; mengubah pengaturan tim tidak mengubah jadwal yang ada.
 
 - Buktikan otorisasi dan penerbitan Threads, termasuk media, izin, status token dan batas API yang berlaku.
 - Buktikan login Google, verifikasi email, undangan dan bootstrap admin pada lingkungan uji.

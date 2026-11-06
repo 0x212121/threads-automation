@@ -70,6 +70,11 @@ Status awal: perencanaan. Kotak belum dicentang bukan klaim bahwa pekerjaan suda
 
 ## 5. API dan kesiapan rilis
 
+- [x] Tambahkan duplikasi konten tim sebagai draft baru tanpa persetujuan atau jadwal, termasuk referensi media, validasi revisi, dan peringatan hasil belum pasti.
+- [x] Tambahkan zona waktu bersama tim yang dapat diubah admin terverifikasi, tanpa menggeser jadwal tersimpan; terapkan untuk tampilan, filter, dan jadwal baru di UI.
+
+- [x] Terapkan rekomendasi halaman Konten Tim: navigasi sidebar, pencarian server, ringkasan berdasarkan data dan filter, status publikasi terpisah dari persetujuan, progres rangkaian, serta aksi kontekstual. Validasi visual pada perangkat dan usability testing bersama pengguna masih diperlukan.
+
 - [x] Ringkas daftar konten menjadi tiga baris dan jumlah bagian/media, dengan dialog isi lengkap. Jangan memasang sumber video secara otomatis pada daftar, detail, atau editor; uji rangkaian, carousel, dan pemutar sesuai pilihan pengguna.
 
 - [x] Terapkan permintaan fitur 1/2/4/5/6: daftar/ubah peran/nonaktif/aktif anggota, pencabutan undangan, kalender/filter server, status/izin/pemutusan lokal akun Threads, hapus draft oleh pembuat, serta riwayat dan audit (migrasi 018). Uji API untuk akses, CSRF, pencabutan sesi, admin terakhir, revisi, tanggal/zona dan pelestarian hasil publikasi; uji browser dengan data sintetis pada desktop/ponsel. Validasi deployment dan Meta/SMTP nyata untuk fitur baru tetap diperlukan.

@@ -76,6 +76,31 @@ test('administrasi anggota memeriksa akses, sesi, admin terakhir dan pencabutan 
   } finally {await f.db.close();}
 });
 
+test('zona waktu tim hanya diubah admin terverifikasi tanpa menggeser jadwal',async()=>{
+  const f=await fixture();
+  try {
+    const admin=await f.login('admin'),editor=await f.login('editor'),reviewer=await f.login('reviewer');
+    assert.equal((await request(f.app).get('/api/team/settings')).status,401);
+    assert.deepEqual((await editor.agent.get('/api/team/settings')).body,{timeZone:'Asia/Makassar',revision:1});
+    const update=(session:{agent:any;csrf:string},data:unknown,csrf=session.csrf)=>session.agent.put('/api/team/settings').set('Origin',f.origin).set('X-CSRF-Token',csrf).send(data);
+    assert.equal((await update(editor,{timeZone:'UTC',revision:1})).status,403);
+    assert.equal((await update(reviewer,{timeZone:'UTC',revision:1})).status,403);
+    assert.equal((await update(admin,{timeZone:'UTC',revision:1},'invalid')).status,403);
+    assert.equal((await update(admin,{timeZone:'Invalid/Zone',revision:1})).status,400);
+    const account=await new ThreadsAccounts(f.pool,f.vault).register(f.admin,{threadsUserId:'123',username:'account',token:'private-token',expiresAt:new Date(Date.now()+86400000)});
+    const post=await f.post('Jadwal tetap'),job=randomUUID();
+    await f.query("INSERT INTO publication_jobs(id,post_id,content_version,account_id,requested_by,scheduled_at,time_zone,next_attempt_at,status) VALUES ($1,$2,1,$3,$4,'2026-11-07T01:00:00Z','Asia/Makassar','2026-11-07T01:00:00Z','scheduled')",[job,post.id,account,f.admin]);
+    assert.deepEqual((await update(admin,{timeZone:'Asia/Jakarta',revision:1})).body,{timeZone:'Asia/Jakarta',revision:2});
+    assert.equal((await update(admin,{timeZone:'UTC',revision:1})).status,409);
+    const saved=(await f.query('SELECT scheduled_at,time_zone FROM publication_jobs WHERE id=$1',[job])).rows[0] as {scheduled_at:Date;time_zone:string};
+    assert.equal(new Date(saved.scheduled_at).toISOString(),'2026-11-07T01:00:00.000Z');assert.equal(saved.time_zone,'Asia/Makassar');
+    assert.equal((await editor.agent.get('/api/team/settings')).body.timeZone,'Asia/Jakarta');
+    assert.ok((await admin.agent.get('/api/audit')).body.events.some((e:{action:string})=>e.action==='team_settings.updated'));
+    await f.query('UPDATE local_users SET email_verified_at=NULL WHERE id=$1',[f.admin]);
+    assert.equal((await update(admin,{timeZone:'UTC',revision:2})).status,403);
+  } finally {await f.db.close();}
+});
+
 test('pemeriksaan izin dari UI hanya memeriksa akun yang dipilih dan tidak mengekspos kredensial',async()=>{
   const f=await fixture(true);
   try {
@@ -96,7 +121,7 @@ test('filter server, hapus draft dan riwayat mempertahankan publikasi dan konten
     const {agent,csrf}=await f.login('admin'),ed=await f.login('editor');
     const account=await new ThreadsAccounts(f.pool,f.vault).register(f.admin,{threadsUserId:'123',username:'account',token:'private-token',expiresAt:new Date(Date.now()+86400000)});
     const first=await f.post('Versi pertama');const store=new ContentStore(f.pool);
-    await store.edit({id:f.admin,role:'admin'},first.id,1,{body:'Versi kedua',destinationAccountId:account});
+    await store.edit({id:f.admin,role:'admin'},first.id,1,{body:'Versi kedua',destinationAccountId:account,replies:['Balasan unik']});
     const another=await f.post('Draft lain',f.editor);
     const path=`/api/posts/${first.id}`;
     assert.equal((await ed.agent.get(`${path}/history`)).body.versions.items.length,2);
@@ -104,6 +129,13 @@ test('filter server, hapus draft dan riwayat mempertahankan publikasi dan konten
     const remove=(id:string,revision:number)=>agent.delete(`/api/posts/${id}`).set('Origin',f.origin).set('X-CSRF-Token',csrf).send({revision});
     assert.equal((await remove(first.id,1)).status,409);
     assert.equal((await agent.get(`/api/posts?accountId=${account}`)).body.posts.length,1);
+    const searched=await agent.get('/api/posts?search=VERSI&status=submitted');
+    assert.equal(searched.body.posts.length,0);assert.equal(searched.body.summary.total,1);
+    assert.equal((await agent.get('/api/posts?search=pertama')).body.posts.length,0);
+    assert.equal((await agent.get('/api/posts?search=KEDUA')).body.posts[0].id,first.id);
+    assert.equal((await agent.get('/api/posts?search=balasan%20unik')).body.posts[0].id,first.id);
+    assert.equal((await agent.get('/api/posts?search=%25')).body.posts.length,0);
+    assert.equal((await agent.get(`/api/posts?search=${'x'.repeat(201)}`)).status,400);
     for (const query of ['status=wrong','accountId=bad','dateFrom=2026-02-31','dateFrom=2026-11-10&dateTo=2026-11-01','timeZone=Invalid/Zone','offset=-1','status=draft&status=approved']) assert.equal((await agent.get(`/api/posts?${query}`)).status,400,query);
     await store.transition({id:f.admin,role:'admin'},first.id,2,'submit');assert.equal((await remove(first.id,3)).status,409);
     await store.transition({id:f.admin,role:'admin'},first.id,3,'approve');
@@ -122,6 +154,23 @@ test('filter server, hapus draft dan riwayat mempertahankan publikasi dan konten
     assert.equal((await f.query('SELECT body FROM content_versions WHERE post_id=$1',[mine.id])).rows[0].body,'Draft dihapus');
     assert.ok((await agent.get('/api/audit')).body.events.some((e:{action:string;subject_id:string})=>e.action==='post.deleted' && e.subject_id===mine.id));
     assert.equal((await agent.get('/api/posts?status=draft')).body.posts.some((p:{id:string})=>p.id===another.id),true);
+  } finally {await f.db.close();}
+});
+
+test('duplikasi membuat versi draft baru dengan balasan dan tanpa akun yang tidak aktif',async()=>{
+  const f=await fixture();
+  try {
+    const owner=await f.login('admin'),editor=await f.login('editor');
+    const account=await new ThreadsAccounts(f.pool,f.vault).register(f.admin,{threadsUserId:'123',username:'account',token:'private-token',expiresAt:new Date(Date.now()+86400000)});
+    const source=await new ContentStore(f.pool).create({id:f.admin,role:'admin'},{body:'Induk',replies:['Balasan satu','Balasan dua'],destinationAccountId:account});
+    await f.query("UPDATE threads_accounts SET token_expires_at=now()-interval '1 day' WHERE id=$1",[account]);
+    assert.equal((await request(f.app).post(`/api/posts/${source.id}/duplicate`).send({revision:1})).status,401);
+    const response=await editor.agent.post(`/api/posts/${source.id}/duplicate`).set('Origin',f.origin).set('X-CSRF-Token',editor.csrf).send({revision:1});
+    assert.equal(response.status,201);const copy=response.body.post.id;
+    const versions=await f.query('SELECT body,destination_account_id,created_by FROM content_versions WHERE post_id=$1',[copy]);
+    assert.deepEqual(versions.rows[0],{body:'Induk',destination_account_id:null,created_by:f.editor});
+    assert.deepEqual((await f.query('SELECT body FROM content_version_replies WHERE post_id=$1 ORDER BY position',[copy])).rows.map((r:any)=>r.body),['Balasan satu','Balasan dua']);
+    assert.equal((await owner.agent.get('/api/audit')).body.events.some((e:{action:string;subject_id:string})=>e.action==='post.duplicated' && e.subject_id===copy),true);
   } finally {await f.db.close();}
 });
 

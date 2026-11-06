@@ -290,7 +290,9 @@ export async function createApp(options: Options) {
       const {offset,where,params}=postFilters(req.query);
       const result = await options.pool.query("SELECT p.id, p.created_by, p.status, p.current_version, p.revision, p.created_at, p.updated_at, v.body, v.media_id, m.kind AS media_kind, COALESCE((SELECT json_agg(json_build_object('id',cm.media_id,'kind',ma.kind) ORDER BY cm.position) FROM content_version_media cm JOIN media_assets ma ON ma.id=cm.media_id WHERE cm.post_id=p.id AND cm.version=p.current_version),'[]'::json) AS media, COALESCE((SELECT json_agg(r.body ORDER BY r.position) FROM content_version_replies r WHERE r.post_id=p.id AND r.version=p.current_version),'[]'::json) AS replies, v.destination_account_id, a.username AS destination_username, j.id AS job_id, j.status AS job_status, j.part_index, j.scheduled_at, j.time_zone, j.published_id, j.failure_code FROM content_posts p JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version LEFT JOIN media_assets m ON m.id=v.media_id LEFT JOIN threads_accounts a ON a.id=v.destination_account_id LEFT JOIN LATERAL (SELECT id,status,part_index,scheduled_at,time_zone,published_id,failure_code FROM publication_jobs WHERE post_id=p.id ORDER BY created_at DESC,id DESC LIMIT 1) j ON true WHERE "+where+" ORDER BY p.created_at DESC, p.id DESC LIMIT 51 OFFSET $1", params);
       const hasMore = result.rows.length > 50;
-      res.set('Cache-Control', 'no-store').json({ posts: result.rows.slice(0, 50), nextOffset: hasMore && offset <= Number.MAX_SAFE_INTEGER - 100 ? offset + 50 : null });
+      const summaryFilter=postFilters({...req.query,status:'all',offset:'0'});
+      const summary=await options.pool.query("SELECT count(*)::int AS total, count(*) FILTER (WHERE p.status='submitted')::int AS submitted, count(*) FILTER (WHERE j.status='scheduled')::int AS scheduled, count(*) FILTER (WHERE j.status IN ('published','confirmed_published'))::int AS published FROM content_posts p JOIN content_versions v ON v.post_id=p.id AND v.version=p.current_version LEFT JOIN LATERAL (SELECT status,scheduled_at FROM publication_jobs WHERE post_id=p.id ORDER BY created_at DESC,id DESC LIMIT 1) j ON true WHERE $1::int=0 AND "+summaryFilter.where,summaryFilter.params);
+      res.set('Cache-Control', 'no-store').json({ posts: result.rows.slice(0, 50), nextOffset: hasMore && offset <= Number.MAX_SAFE_INTEGER - 100 ? offset + 50 : null, summary:summary.rows[0] });
     } catch (error) { if (error instanceof ManagementError) {res.status(error.status).json({error:error.message});return;} next(error); }
   });
   app.post('/api/posts', requireUser, checkCsrf, async (req, res, next) => {
@@ -301,6 +303,15 @@ export async function createApp(options: Options) {
       const post = await content.create({ id: actor.id, role: actor.role }, { body: body.body, destinationAccountId: body.destinationAccountId ?? null, mediaId: body.mediaId, mediaIds: body.mediaIds, replies: body.replies });
       res.set('Cache-Control', 'no-store').status(201).json({ post });
     } catch (error) { if (error instanceof DomainError) { res.status(400).json({ error: error.message }); return; } next(error); }
+  });
+  app.post('/api/posts/:id/duplicate', requireUser, checkCsrf, async (req, res, next) => {
+    try {
+      const body=req.body;
+      if (!body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).some(key=>key!=='revision') || !Number.isSafeInteger(body.revision)) {res.status(400).json({error:'Masukan tidak valid.'});return;}
+      const actor=res.locals.user as User;
+      const post=await content.duplicate({id:actor.id,role:actor.role},req.params.id as string,body.revision);
+      res.set('Cache-Control','no-store').status(201).json({post});
+    } catch (error) {if (error instanceof DomainError) {res.status(409).json({error:error.message});return;} if (error instanceof PermissionError) {res.status(403).json({error:error.message});return;} next(error);}
   });
   app.put('/api/posts/:id', requireUser, checkCsrf, async (req, res, next) => {
     try {

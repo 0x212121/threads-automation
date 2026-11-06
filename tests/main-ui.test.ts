@@ -16,7 +16,7 @@ async function waitFor(predicate: () => boolean) {
 
 test('antarmuka utama login, menyimpan draft di server dan menyetujuinya', async () => {
   const db = new PGlite();
-  for (const migration of ['001_content.sql', '002_local_identity.sql', '006_password_reset.sql', '007_threads_accounts.sql','013_token_refresh.sql', '009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql','017_publication_failure_details.sql', '010_publication_resolutions.sql','018_workspace_management.sql']) await db.exec(await readFile(`db/migrations/${migration}`, 'utf8'));
+  for (const migration of ['001_content.sql', '002_local_identity.sql', '006_password_reset.sql', '007_threads_accounts.sql','013_token_refresh.sql', '009_publication_jobs.sql','011_publication_diagnostics.sql','012_media.sql','014_carousel.sql','015_thread_replies.sql','016_publication_reference_repairs.sql','017_publication_failure_details.sql', '010_publication_resolutions.sql','018_workspace_management.sql','019_team_timezone.sql']) await db.exec(await readFile(`db/migrations/${migration}`, 'utf8'));
   const query = async (text: string, params?: unknown[]) => { const result = await db.query(text, params); return { ...result, rowCount: result.rows.length }; };
   const pool = { query, connect: async () => ({ query, release: () => {} }) } as unknown as Pool;
   await bootstrapAdmin(pool, 'kata sandi untuk pengujian');
@@ -55,6 +55,8 @@ test('antarmuka utama login, menyimpan draft di server dan menyetujuinya', async
   (get('#password') as HTMLInputElement).value = 'kata sandi untuk pengujian';
   get('#login-form').dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
   await waitFor(() => !get('#workspace').hidden && get('#loading').hidden);
+  assert.equal(get('#threads-connect-panel').hidden, true);
+  get('[data-panel="accounts"]').click();
   assert.equal(get('#threads-connect-panel').hidden, false);
   assert.equal((get('#connect-threads') as HTMLButtonElement).disabled, false);
   assert.match(get('#threads-config-message').textContent ?? '', /THREADS_APP_ID/);
@@ -66,6 +68,7 @@ test('antarmuka utama login, menyimpan draft di server dan menyetujuinya', async
   assert.equal((get('#connect-threads') as HTMLButtonElement).disabled, false);
   assert.equal(get('#threads-config-message').hidden, true);
   setConnectionState('admin', true, false);
+  get('[data-panel="content"]').click();
   get('#new-post').click();
   (get('#post-text') as HTMLTextAreaElement).value = 'Draft dari UI utama';
   (get('#post-account') as HTMLSelectElement).value = '99999999-9999-4999-8999-999999999999';
@@ -73,15 +76,16 @@ test('antarmuka utama login, menyimpan draft di server dan menyetujuinya', async
   await waitFor(() => win.document.querySelector('.post-text')?.textContent === 'Draft dari UI utama');
   const clickAction = (label: string) => [...win.document.querySelectorAll<HTMLButtonElement>('.action')].find(button => button.textContent === label)?.click();
   clickAction('Ajukan');
-  await waitFor(() => win.document.querySelector('.status')?.textContent === 'Menunggu tinjauan');
+  await waitFor(() => win.document.querySelector('.approval-status')?.textContent === 'Persetujuan: Menunggu tinjauan');
   clickAction('Setujui');
-  await waitFor(() => win.document.querySelector('.status')?.textContent === 'Disetujui');
+  await waitFor(() => win.document.querySelector('.approval-status')?.textContent === 'Persetujuan: Disetujui');
+  assert.equal(win.document.querySelector('.status')?.textContent, 'Belum dijadwalkan');
   const stored = await db.query<{ status: string }>('SELECT status FROM content_posts');
   assert.equal(stored.rows[0]?.status, 'approved');
   clickAction('Jadwalkan');
-  assert.equal(scheduleDialog.open, true);
-  (get('#schedule-time') as HTMLInputElement).value = new Date(Date.now()+3600000).toISOString().slice(0,16);
-  (get('#schedule-zone') as HTMLInputElement).value = 'UTC';
+  await waitFor(() => scheduleDialog.open);
+  (get('#schedule-time') as HTMLInputElement).value = new Date(Date.now()+9*3600000).toISOString().slice(0,16);
+  assert.equal((get('#schedule-zone') as HTMLInputElement).value, 'Asia/Makassar');
   get('#schedule-form').dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
   await waitFor(() => win.document.querySelector('.post-row .field-help')?.textContent?.includes('Terjadwal') === true);
   clickAction('Batalkan jadwal');
@@ -89,6 +93,15 @@ test('antarmuka utama login, menyimpan draft di server dan menyetujuinya', async
   await db.query("UPDATE publication_jobs SET status='needs_action',failure_code='meta_auth'");
   await win.eval('loadPosts()');
   assert.match(win.document.querySelector('.post-row .field-help')?.textContent ?? '', /Meta menolak akses/);
+  clickAction('Duplikasi');
+  await waitFor(() => win.document.querySelectorAll('.post-row').length === 2);
+  assert.equal((await db.query("SELECT id FROM content_posts WHERE status='draft'")).rows.length,1);
+  get('[data-panel="settings"]').click();
+  await waitFor(() => get('#settings-status').textContent?.includes('Asia/Makassar') === true);
+  (get('#team-time-zone') as HTMLInputElement).value='Asia/Jakarta';
+  get('#settings-form').dispatchEvent(new win.Event('submit',{bubbles:true,cancelable:true}));
+  await waitFor(() => get('#settings-status').textContent?.includes('disimpan') === true);
+  assert.equal((get('#filter-zone') as HTMLInputElement).value,'Asia/Jakarta');
   await db.exec(await readFile('db/migrations/005_invitations.sql', 'utf8'));
   get('#invite-member').click();
   (get('#invite-email') as HTMLInputElement).value = 'tim@example.test';

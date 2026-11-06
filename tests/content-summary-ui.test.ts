@@ -25,6 +25,7 @@ test('daftar merangkum rangkaian dan video baru mendapatkan sumber setelah pemut
     win.fetch=(async(path:string)=>{
       let result:unknown={};
       if (path==='/api/auth/csrf') result={csrfToken:'csrf'};
+      else if (path==='/api/team/settings') result={timeZone:'Asia/Makassar',revision:1};
       else if (path==='/api/auth/me') result={user:{id:'user1',email:'user@example.test',role:'editor',emailVerified:true}};
       else if (path==='/api/threads/accounts') result={accounts:[]};
       else if (path==='/api/threads/config') result={configured:false,publishingEnabled:false};

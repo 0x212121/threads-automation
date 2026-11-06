@@ -637,8 +637,14 @@
             "session": []
           }
         ],
-        "description": "Daftar konten tim yang belum dihapus; filter diterapkan sebelum paginasi. Status cocok dengan status konten atau pekerjaan terakhir. Rentang tanggal inklusif dalam zona IANA pilihan (dateTo diterjemahkan menjadi awal hari berikutnya eksklusif). Kalender menggunakan dateField=scheduled dan rentang satu bulan, termasuk paginasi. Parameter tidak dikenal atau tanggal/zona tidak valid ditolak.",
+        "description": "Daftar konten tim yang belum dihapus; filter dan pencarian diterapkan sebelum paginasi. Status terbit mencakup publikasi yang dikonfirmasi. Ringkasan menghitung semua hasil yang cocok dengan pencarian, akun dan tanggal tanpa filter status. Rentang tanggal inklusif dalam zona IANA pilihan. Parameter tidak dikenal atau tanggal/zona tidak valid ditolak.",
         "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "description": "Pencarian literal tanpa membedakan huruf besar pada isi dan bagian rangkaian versi saat ini.",
+            "schema": { "type": "string", "maxLength": 200 }
+          },
           {
             "name": "offset",
             "in": "query",
@@ -727,9 +733,20 @@
                   "type": "object",
                   "required": [
                     "posts",
-                    "nextOffset"
+                    "nextOffset",
+                    "summary"
                   ],
                   "properties": {
+                    "summary": {
+                      "type": "object",
+                      "required": ["total", "submitted", "scheduled", "published"],
+                      "properties": {
+                        "total": { "type": "integer", "minimum": 0 },
+                        "submitted": { "type": "integer", "minimum": 0 },
+                        "scheduled": { "type": "integer", "minimum": 0 },
+                        "published": { "type": "integer", "minimum": 0 }
+                      }
+                    },
                     "posts": {
                       "type": "array",
                       "items": {
@@ -816,6 +833,32 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/api/team/settings": {
+      "get": {
+        "operationId":"getTeamSettings",
+        "description":"Seluruh anggota aktif dapat membaca zona waktu tim dan revisinya.",
+        "security":[{"session":[]}],
+        "responses":{"200":{"description":"Pengaturan tim","content":{"application/json":{"schema":{"type":"object","required":["timeZone","revision"],"properties":{"timeZone":{"type":"string","example":"Asia/Makassar"},"revision":{"type":"integer","minimum":1}}}}}},"401":{"$ref":"#/components/responses/Error"},"503":{"$ref":"#/components/responses/Error"}}
+      },
+      "put": {
+        "operationId":"updateTeamSettings",
+        "description":"Hanya admin terverifikasi dapat mengubah zona waktu IANA. Perubahan tidak memodifikasi jadwal yang sudah disimpan. Revisi mencegah perubahan bersamaan saling menimpa.",
+        "security":[{"session":[]}],
+        "parameters":[{"$ref":"#/components/parameters/Origin"},{"$ref":"#/components/parameters/CsrfToken"}],
+        "requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["timeZone","revision"],"properties":{"timeZone":{"type":"string","maxLength":100,"example":"Asia/Jakarta"},"revision":{"type":"integer","minimum":1}}}}}},
+        "responses":{"200":{"description":"Pengaturan disimpan","content":{"application/json":{"schema":{"type":"object","required":["timeZone","revision"],"properties":{"timeZone":{"type":"string"},"revision":{"type":"integer","minimum":1}}}}}},"400":{"$ref":"#/components/responses/Error"},"401":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"409":{"$ref":"#/components/responses/Error"}}
+      }
+    },
+    "/api/posts/{id}/duplicate": {
+      "post": {
+        "operationId": "duplicatePost",
+        "description": "Anggota aktif menyalin versi terkini yang dapat dibaca menjadi draft miliknya. Teks, urutan media dan balasan disalin; akun tidak aktif dikosongkan. Persetujuan dan pekerjaan publikasi tidak disalin. Revisi usang ditolak.",
+        "security": [{"session": []}],
+        "parameters": [{"$ref":"#/components/parameters/PostId"},{"$ref":"#/components/parameters/Origin"},{"$ref":"#/components/parameters/CsrfToken"}],
+        "requestBody": {"required":true,"content":{"application/json":{"schema":{"type":"object","required":["revision"],"additionalProperties":false,"properties":{"revision":{"type":"integer","minimum":1}}}}}},
+        "responses": {"201":{"$ref":"#/components/responses/Post"},"400":{"$ref":"#/components/responses/Error"},"401":{"$ref":"#/components/responses/Error"},"403":{"$ref":"#/components/responses/Error"},"409":{"$ref":"#/components/responses/Error"}}
       }
     },
     "/api/posts/{id}": {

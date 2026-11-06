@@ -57,6 +57,14 @@ test('media privat terikat versi, disetujui dan dipublikasikan setelah siap', as
     assert.equal((await owner.agent.delete(`/api/media/${id}`).set('Origin',origin).set('X-CSRF-Token',owner.csrf)).status,409);
     const act=(name:string,revision:number) => owner.agent.post(`/api/posts/${post}/${name}`).set('Origin',origin).set('X-CSRF-Token',owner.csrf).send({revision});
     assert.equal((await act('submit',1)).status,200); assert.equal((await act('approve',2)).status,200);
+    assert.equal((await other.agent.post(`/api/posts/${post}/duplicate`).set('Origin',origin).set('X-CSRF-Token','wrong').send({revision:3})).status,403);
+    assert.equal((await other.agent.post(`/api/posts/${post}/duplicate`).set('Origin',origin).set('X-CSRF-Token',other.csrf).send({revision:2})).status,409);
+    const duplicate=await other.agent.post(`/api/posts/${post}/duplicate`).set('Origin',origin).set('X-CSRF-Token',other.csrf).send({revision:3});
+    assert.equal(duplicate.status,201);assert.equal(duplicate.body.post.status,'draft');
+    const copied=duplicate.body.post.id as string;
+    assert.equal((await db.query('SELECT id FROM content_reviews WHERE post_id=$1',[copied])).rows.length,0);
+    assert.equal((await db.query('SELECT id FROM publication_jobs WHERE post_id=$1',[copied])).rows.length,0);
+    assert.equal((await other.agent.put(`/api/posts/${copied}`).set('Origin',origin).set('X-CSRF-Token',other.csrf).send({body:'Salinan',revision:1})).status,200);
     const edited=await owner.agent.put(`/api/posts/${post}`).set('Origin',origin).set('X-CSRF-Token',owner.csrf).send({body:'Pengganti',mediaId:null,revision:3});
     assert.equal(edited.status,200); assert.equal(edited.body.post.status,'draft');
     const reattached=await owner.agent.put(`/api/posts/${post}`).set('Origin',origin).set('X-CSRF-Token',owner.csrf).send({body:'',mediaId:id,revision:4});
